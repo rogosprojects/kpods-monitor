@@ -1,0 +1,145 @@
+# Kubernetes Pod Monitor - Example Configuration
+# This file demonstrates the various configuration options available
+
+# General dashboard settings
+general:
+  # Name displayed in the dashboard header.
+  #This simple configuration option provides important context to users and helps distinguish between different instances of the monitoring dashboard in multi-cluster or multi-environment setups.
+  name: "Kubernetes Pod Monitor Dashboard"
+
+  # Refresh interval in seconds (how often data is fetched from Kubernetes)
+  refreshInterval: 30
+
+  # HTTP server port
+  port: 8080
+
+  # Enable debug logging (more verbose output)
+  debug: false
+
+  # Authentication configuration
+  auth:
+    # Set to true to enable authentication
+    enabled: false
+
+    # Authentication type: "basic", "token", or "none"
+    type: "none"
+
+    # For token authentication
+    apiKey: ""
+
+    # For basic authentication
+    username: "admin"
+    password: "change_this_password"
+
+# Kubernetes cluster connection settings
+cluster:
+  # Set to true when running inside a Kubernetes cluster
+  inCluster: false
+
+  # Path to kubeconfig file (used when inCluster is false)
+  # Supports ~ for home directory
+  kubeConfigPath: "~/.kube/config"
+
+# Applications to monitor
+# Each application can span multiple namespaces and include various workloads
+applications:
+  # Example 1: Frontend application
+  - name: "Frontend Application"
+    description: "Customer-facing web UI components"
+    # Lower order values appear first in the UI
+    order: 10
+    selector:
+      # Production namespace
+      production:
+        # Select by deployment names
+        deployments:
+          - frontend-web
+          - frontend-api
+          - auth-service
+
+      # Staging namespace (same application, different environment)
+      staging:
+        deployments:
+          - frontend-web
+          - frontend-api
+          - auth-service
+
+  # Example 2: Backend services
+  - name: "Backend Services"
+    description: "Core backend microservices"
+    order: 20
+    selector:
+      production:
+        # Select by deployment names
+        deployments:
+          - user-service
+          - payment-service
+          - notification-service
+
+        # Also include statefulsets
+        statefulSets:
+          - message-queue
+
+  # Example 3: Database cluster
+  - name: "Database Cluster"
+    description: "PostgreSQL database cluster"
+    order: 30
+    selector:
+      production:
+        # Select by statefulset names
+        statefulSets:
+          - postgres-master
+          - postgres-replica
+
+      # You can also monitor the same workloads in other namespaces
+      staging:
+        statefulSets:
+          - postgres-master
+          - postgres-replica
+
+  # Example 4: Monitoring stack
+  - name: "Monitoring Stack"
+    description: "Prometheus, Grafana, and AlertManager"
+    order: 40
+    selector:
+      monitoring:
+        # Select by labels
+        labels:
+          app: "monitoring"
+          component: "metrics"
+
+        # You can also specify specific deployments
+        deployments:
+          - grafana
+          - alertmanager
+
+  # Example 5: System services
+  - name: "System Services"
+    description: "Cluster-wide system services"
+    order: 50
+    selector:
+      kube-system:
+        # Select DaemonSets
+        daemonSets:
+          - node-exporter
+          - fluentd
+
+        # Select by annotations
+        annotations:
+          "kubernetes.io/component": "system"
+
+  # Example 6: Mixed selection criteria
+  - name: "API Gateway"
+    description: "API Gateway and related services"
+    order: 60
+    selector:
+      networking:
+        # You can combine different selection methods
+        deployments:
+          - api-gateway
+          - rate-limiter
+
+        # Labels will select any pods matching these labels
+        labels:
+          app: "gateway"
+          tier: "frontend"
