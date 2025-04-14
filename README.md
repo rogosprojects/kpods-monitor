@@ -1,8 +1,6 @@
 # Lightweight Kubernetes Pod Monitoring
 
-
 ![Go Version](https://img.shields.io/badge/golang-1.24+-blue)
-![Kubernetes Version](https://img.shields.io/badge/kubernetes-1.28+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
 A modern dashboard for monitoring Kubernetes applications and their pods with real-time updates.

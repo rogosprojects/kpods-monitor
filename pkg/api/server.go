@@ -456,11 +456,8 @@ func (s *Server) setupRoutes() {
 	}))
 }
 
-// Start initializes HTTP server and starts background refreshing
+// Start initializes HTTP server
 func (s *Server) Start() error {
-	// Start background refresh
-	go s.startRefreshLoop()
-
 	// Start HTTP server
 	port := s.config.General.Port
 	if port == 0 {
@@ -479,44 +476,21 @@ func (s *Server) Start() error {
 	return http.ListenAndServe(fmt.Sprintf(":%d", port), s.router)
 }
 
-// startRefreshLoop periodically refreshes data in background
-func (s *Server) startRefreshLoop() {
-	// Get refresh interval from config (with sane defaults)
-	interval := time.Duration(s.config.General.RefreshInterval) * time.Second
-	if interval < 5*time.Second {
-		interval = 30 * time.Second // Default to 30 seconds if config is too low
-	}
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			// Check if refresh is needed
-			s.mutex.RLock()
-			sinceLastRefresh := time.Since(s.lastRefresh)
-			s.mutex.RUnlock()
-
-			if sinceLastRefresh >= interval {
-				if err := s.refreshData(); err != nil {
-					s.logger.Error("Error in background refresh", err, map[string]interface{}{
-						"interval":                interval.String(),
-						"time_since_last_refresh": sinceLastRefresh.String(),
-					})
-				}
-			}
-		}
-	}
-}
-
 // startPolling starts the polling ticker when clients are connected
 func (s *Server) startPolling() {
 	// Stop any existing ticker
 	s.stopPolling()
 
-	// Create a new ticker
+	// Get refresh interval from config (with sane defaults)
 	interval := time.Duration(s.config.General.RefreshInterval) * time.Second
+	if interval < 5*time.Second {
+		interval = 30 * time.Second // Default to 30 seconds if config is too low
+		s.logger.Warn("Refresh interval too low, using default of 30 seconds", map[string]interface{}{
+			"configured_interval": s.config.General.RefreshInterval,
+		})
+	}
+
+	// Create a new ticker
 	s.ticker = time.NewTicker(interval)
 	s.tickerDone = make(chan struct{})
 
@@ -533,7 +507,26 @@ func (s *Server) startPolling() {
 					s.logger.Info("Polling ticker triggered", map[string]interface{}{
 						"active_clients": s.activeClients.Load(),
 					})
-					s.refreshData()
+
+					// Check if refresh is needed based on time since last refresh
+					s.mutex.RLock()
+					sinceLastRefresh := time.Since(s.lastRefresh)
+					s.mutex.RUnlock()
+
+					// Only refresh if enough time has passed (prevents excessive refreshes)
+					if sinceLastRefresh >= interval/2 {
+						if err := s.refreshData(); err != nil {
+							s.logger.Error("Error in polling refresh", err, map[string]interface{}{
+								"interval":                interval.String(),
+								"time_since_last_refresh": sinceLastRefresh.String(),
+							})
+						}
+					} else {
+						s.logger.Debug("Skipping refresh, last refresh too recent", map[string]interface{}{
+							"time_since_last_refresh": sinceLastRefresh.String(),
+							"minimum_interval":        (interval / 2).String(),
+						})
+					}
 				} else {
 					s.logger.Debug("Polling ticker triggered but no active clients", map[string]interface{}{
 						"action": "skipping refresh",
@@ -733,6 +726,16 @@ func (s *Server) registerClient(client *websocketClient) {
 
 	// Start polling if this is the first client
 	if clientCount == 1 {
+		// Perform an immediate refresh to ensure fresh data
+		go func() {
+			if err := s.refreshData(); err != nil {
+				s.logger.Error("Error in immediate refresh on client connect", err, map[string]interface{}{
+					"client_ip": client.ipAddress,
+				})
+			}
+		}()
+
+		// Start the polling mechanism
 		s.startPolling()
 	}
 }
