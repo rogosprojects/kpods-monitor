@@ -1,4 +1,4 @@
-# kpods-monitor: Lightweight Kubernetes Pod Monitoring
+# Lightweight Kubernetes Pod Monitoring
 
 
 ![Go Version](https://img.shields.io/badge/golang-1.24+-blue)
