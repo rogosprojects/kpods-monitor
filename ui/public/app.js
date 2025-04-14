@@ -263,7 +263,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-
+  // Update the dashboard name displayed on the dashboard
+  function updateDashboardName(name) {
+    dashboardName = name; // Update the global variable
+    const nameEl = document.querySelector('.dashboard-description strong');
+    if (nameEl) {
+      nameEl.textContent = name;
+    }
+  }
 
   // Helper function to check if arrays are equal
   function arraysEqual(a, b) {
