@@ -16,6 +16,10 @@ general:
   # Enable debug logging (more verbose output)
   debug: false
 
+  # Base path for hosting the application (e.g., "/some-path")
+  # Leave empty to host at the root path
+  basePath: ""
+
   # Authentication configuration
   auth:
     # Set to true to enable authentication

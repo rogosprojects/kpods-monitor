@@ -311,17 +311,53 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 
 // setupRoutes configures the router with all API endpoints
 func (s *Server) setupRoutes() {
+	// Get base path from config (default to empty string if not set)
+	basePath := s.config.General.BasePath
+
+	// Ensure base path starts with / if it's not empty
+	if basePath != "" && !strings.HasPrefix(basePath, "/") {
+		basePath = "/" + basePath
+	}
+
+	// Remove trailing slash if present
+	if basePath != "" && strings.HasSuffix(basePath, "/") {
+		basePath = basePath[:len(basePath)-1]
+	}
+
+	// Create a subrouter for the base path if one is configured
+	var baseRouter *mux.Router
+	if basePath != "" {
+		s.logger.Info("Configuring application with base path", map[string]interface{}{
+			"base_path": basePath,
+		})
+
+		// Add a redirect from root to the base path
+		s.router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, basePath+"/", http.StatusMovedPermanently)
+		})
+
+		// Handle the base path itself
+		s.router.HandleFunc(basePath, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, basePath+"/", http.StatusMovedPermanently)
+		})
+
+		// Create a subrouter for the base path
+		baseRouter = s.router.PathPrefix(basePath).Subrouter()
+	} else {
+		baseRouter = s.router
+	}
+
 	// Apply security headers middleware to all routes
-	s.router.Use(s.securityHeadersMiddleware)
+	baseRouter.Use(s.securityHeadersMiddleware)
 
 	// Apply logging middleware to all routes
-	s.router.Use(loggingMiddleware(s.logger))
+	baseRouter.Use(loggingMiddleware(s.logger))
 
 	// Apply security monitoring middleware to all routes
-	s.router.Use(securityMiddleware(s.logger))
+	baseRouter.Use(securityMiddleware(s.logger))
 
 	// Create API subrouter with rate limiting and auth middleware
-	apiRouter := s.router.PathPrefix("/api").Subrouter()
+	apiRouter := baseRouter.PathPrefix("/api").Subrouter()
 
 	// Apply rate limiting to API endpoints
 	apiRouter.Use(s.rateLimitMiddleware)
@@ -348,17 +384,50 @@ func (s *Server) setupRoutes() {
 	apiRouter.HandleFunc("/namespaces", s.handleGetNamespaces).Methods("GET")
 	apiRouter.HandleFunc("/config", s.handleGetConfig).Methods("GET")
 
-	// WebSocket endpoint - register directly on the main router to avoid middleware issues
-	s.router.HandleFunc("/api/ws", s.handleWebSocket).Methods("GET")
+	// WebSocket endpoint - register directly on the baseRouter to avoid middleware issues
+	baseRouter.HandleFunc("/api/ws", s.handleWebSocket).Methods("GET")
 
-	// Health and monitoring endpoints
+	// Health and monitoring endpoints - these are registered at the root level
+	// to ensure they're always accessible for health checks regardless of base path
 	s.router.HandleFunc("/health", s.handleHealth).Methods("GET")
 	s.router.HandleFunc("/ready", s.handleReadiness).Methods("GET")
 	s.router.HandleFunc("/metrics", s.handleMetrics).Methods("GET")
 
-	// Serve static files from the ui/public directory
+	// Also register health endpoints on the base path for consistency
+	if basePath != "" {
+		baseRouter.HandleFunc("/health", s.handleHealth).Methods("GET")
+		baseRouter.HandleFunc("/ready", s.handleReadiness).Methods("GET")
+		baseRouter.HandleFunc("/metrics", s.handleMetrics).Methods("GET")
+	}
+
+	// Create a file server for static files
 	fs := http.FileServer(http.Dir("./ui/public"))
-	s.router.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+	// Add a handler for the root of the base path to serve index.html
+	baseRouter.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Set security headers
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; object-src 'none'; connect-src 'self' ws: wss:")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+		// Serve the index.html file
+		http.ServeFile(w, r, "./ui/public/index.html")
+	})
+
+	// Create a handler for static files that strips the base path prefix
+	var staticHandler http.Handler
+	if basePath != "" {
+		// For base path, we need to strip the prefix before serving files
+		staticHandler = http.StripPrefix(basePath, fs)
+	} else {
+		staticHandler = fs
+	}
+
+	// Serve static files with security headers
+	baseRouter.PathPrefix("/").Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set security headers
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -377,8 +446,13 @@ func (s *Server) setupRoutes() {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate") // No caching for HTML/other
 		}
 
+		// Log the request path for debugging
+		s.logger.Debug("Serving static file", map[string]interface{}{
+			"path": r.URL.Path,
+		})
+
 		// Serve the file
-		fs.ServeHTTP(w, r)
+		staticHandler.ServeHTTP(w, r)
 	}))
 }
 
@@ -395,6 +469,7 @@ func (s *Server) Start() error {
 
 	s.logger.Info("Starting server", map[string]interface{}{
 		"port":                   port,
+		"base_path":              s.config.General.BasePath,
 		"auth_enabled":           s.config.General.Auth.Enabled,
 		"auth_type":              s.config.General.Auth.Type,
 		"refresh_interval":       time.Duration(s.config.General.RefreshInterval) * time.Second,

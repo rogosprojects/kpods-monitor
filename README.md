@@ -193,6 +193,9 @@ general:
   # Enable or disable debug logging
   debug: false
 
+  # Base path for hosting the application (e.g., "/some-path")
+  basePath: ""
+
   # Authentication configuration
   auth:
     enabled: false
@@ -315,6 +318,24 @@ applications:
 
 Applications without an order value are displayed alphabetically after those with order values.
 
+
+### Base Path Configuration
+
+The dashboard can be hosted under a custom base path, which is useful when deploying behind a reverse proxy or in environments where the application needs to be served from a subpath:
+
+```yaml
+general:
+  # Base path for hosting the application
+  basePath: "/kpods-monitor"
+```
+
+With this configuration:
+- The dashboard will be accessible at `http://your-server/kpods-monitor`
+- All API endpoints will be prefixed with the base path (e.g., `/kpods-monitor/api/applications`)
+- WebSocket connections will use the correct path automatically
+- Static assets will be served correctly under the base path
+
+Leave the `basePath` empty to host at the root path.
 
 ### Authentication
 

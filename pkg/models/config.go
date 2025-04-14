@@ -26,6 +26,9 @@ type GeneralConfig struct {
 	// Enable or disable debug logging
 	Debug bool `json:"debug" yaml:"debug"`
 
+	// Base path for hosting the application (e.g., "/some-path")
+	BasePath string `json:"basePath" yaml:"basePath"`
+
 	// Authentication configuration
 	Auth AuthConfig `json:"auth" yaml:"auth"`
 }

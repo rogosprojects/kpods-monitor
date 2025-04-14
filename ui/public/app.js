@@ -13,6 +13,34 @@ document.addEventListener('DOMContentLoaded', () => {
   let wsReconnectAttempts = 0;
   let wsPingInterval = null; // Interval for sending ping messages
 
+  // Get the base path from the current URL
+  // This handles cases where the app is hosted under a subpath
+  const getBasePath = () => {
+    // Get the path from the current URL, excluding any query parameters
+    const path = window.location.pathname;
+
+    // If the path ends with '/' or is empty, return it as is
+    if (path === '/' || path === '') {
+      return '';
+    }
+
+    // If the path ends with '/index.html', remove it
+    if (path.endsWith('/index.html')) {
+      return path.substring(0, path.length - 11); // 11 is the length of '/index.html'
+    }
+
+    // Otherwise, return the directory part of the path
+    const lastSlashIndex = path.lastIndexOf('/');
+    if (lastSlashIndex <= 0) {
+      return '';
+    }
+
+    return path.substring(0, lastSlashIndex);
+  };
+
+  // Get the base path once at initialization
+  const basePath = getBasePath();
+
   // DOM elements
   const rootElement = document.getElementById('root');
 
@@ -54,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Use the same URL structure as regular API calls
     // The authentication is handled by the authMiddleware on the server
-    const wsUrl = `${wsProtocol}//${window.location.host}/api/ws`;
+    const wsUrl = `${wsProtocol}//${window.location.host}${basePath}/api/ws`;
 
     wsConnection = new WebSocket(wsUrl);
 
@@ -190,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       // Simple HTTP fetch to get applications data
-      const url = '/api/applications';
+      const url = `${basePath}/api/applications`;
 
       // Fetch applications
       const response = await fetch(url);
@@ -202,7 +230,7 @@ document.addEventListener('DOMContentLoaded', () => {
       lastUpdated = data.lastUpdated ? new Date(data.lastUpdated) : new Date();
 
       // Fetch namespaces
-      const nsResponse = await fetch('/api/namespaces');
+      const nsResponse = await fetch(`${basePath}/api/namespaces`);
       if (nsResponse.ok) {
         const newNamespaces = await nsResponse.json();
         // Only rebuild namespace selector if namespaces changed
@@ -242,7 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function fetchConfig() {
     try {
       // Fetch refresh interval from server config
-      const response = await fetch('/api/config');
+      const response = await fetch(`${basePath}/api/config`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -324,7 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="dashboard">
         <header class="dashboard-header">
           <h1>
-            <img src="logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo">
+            <img src="${basePath}/logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo">
           </h1>
           <div class="dashboard-actions">
             <select class="namespace-selector" disabled>
@@ -346,7 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="dashboard">
         <header class="dashboard-header">
           <h1>
-            <img src="logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo">
+            <img src="${basePath}/logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo">
           </h1>
           <div class="dashboard-actions">
             <select class="namespace-selector" disabled>
@@ -398,7 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="dashboard">
         <header class="dashboard-header">
           <h1>
-            <img src="logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo">
+            <img src="${basePath}/logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo">
           </h1>
           <div class="dashboard-actions">
             <select class="namespace-selector" id="namespace-selector">
