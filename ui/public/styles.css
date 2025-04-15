@@ -24,6 +24,13 @@ body {
   font-size: 24px;
   color: #1a202c;
   margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+.dashboard-logo {
+  height: 32px;
+  margin-right: 10px;
 }
 
 .dashboard-actions {
@@ -55,7 +62,7 @@ body {
 /* Application Card Styles */
 .applications-container {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
   gap: 20px;
 }
 
@@ -82,6 +89,7 @@ body {
   cursor: pointer;
   position: relative;
   transition: background-color 0.2s ease;
+  flex-wrap: wrap;
 }
 
 .application-header:hover {
@@ -99,6 +107,8 @@ body {
   font-weight: 600;
   color: #2d3748;
   flex-grow: 1;
+  display: flex;
+  align-items: center;
 }
 
 .app-stats {
@@ -133,6 +143,7 @@ body {
   flex-wrap: wrap;
   gap: 6px;
   margin-right: 12px;
+  align-items: center;
 }
 
 .namespace-tag {
@@ -140,6 +151,9 @@ body {
   background-color: #e2e8f0;
   border-radius: 4px;
   font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
 }
 
 .pod-status-badge {
@@ -151,6 +165,9 @@ body {
   font-size: 12px;
   font-weight: 500;
   margin-right: 12px;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
 }
 
 /* WebSocket connection status indicator */
@@ -181,10 +198,13 @@ body {
 
 .health-indicator {
   padding: 4px 10px;
-  border-radius: 12px;
+  border-radius: 4px;
   color: white;
   font-size: 12px;
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
 }
 
 /* Pods Table Styles */
@@ -337,13 +357,12 @@ body {
 }
 
 .app-version{
-  position: absolute;
-  padding: 0.5rem 1rem;
+  padding: 0.25rem 0.5rem;
   border-radius: 1rem;
   font-size: 0.5rem;
-  vertical-align: top;
   font-weight: lighter;
   font-family: monospace;
+  margin-left: 8px;
 }
 
 /* Dashboard info and last updated timestamp */
@@ -422,5 +441,158 @@ body {
 
   .dashboard-actions {
     margin-top: 12px;
+  }
+
+  .dashboard-info {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .last-updated {
+    margin-top: 8px;
+  }
+}
+
+/* Medium-sized devices (tablets, small laptops) */
+@media (max-width: 768px) {
+  .applications-container {
+    grid-template-columns: 1fr;
+  }
+
+  .pods-table th, .pods-table td {
+    padding: 10px 6px;
+    font-size: 13px;
+  }
+
+  .status-indicator {
+    min-width: 70px;
+    font-size: 11px;
+  }
+
+  .application-header {
+    padding: 14px;
+  }
+
+  .application-header h2 {
+    font-size: 17px;
+  }
+}
+
+/* iPhone and small mobile devices */
+@media (max-width: 480px) {
+  .dashboard-logo {
+    height: 24px;
+  }
+
+  .dashboard-header h1 {
+    font-size: 18px;
+  }
+
+  .dashboard-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .namespace-selector {
+    flex-grow: 1;
+    min-width: 150px;
+  }
+
+  .connection-status {
+    margin-left: 0;
+    margin-top: 8px;
+    width: 100%;
+    justify-content: center;
+  }
+  .dashboard {
+    padding: 12px;
+  }
+
+  .applications-container {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .application-header {
+    flex-wrap: wrap;
+    padding: 12px;
+  }
+
+  .application-header h2 {
+    width: 100%;
+    margin-bottom: 8px;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+  }
+
+  .namespace-tags-container {
+    order: 1;
+    margin-right: 8px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+  }
+
+  .pod-status-badge {
+    order: 2;
+    margin-right: 8px;
+    margin-bottom: 8px;
+  }
+
+  .health-indicator {
+    order: 3;
+    align-self: center;
+    margin-right: 8px;
+    margin-bottom: 8px;
+  }
+
+  /* Adjust table for mobile */
+  .pods-table th, .pods-table td {
+    padding: 8px 4px;
+    font-size: 12px;
+  }
+
+  .pods-table th:nth-child(5),
+  .pods-table th:nth-child(6),
+  .pods-table td:nth-child(5),
+  .pods-table td:nth-child(6) {
+    display: none; /* Hide CPU and Memory columns on very small screens */
+  }
+
+  .status-indicator {
+    min-width: 60px;
+    font-size: 11px;
+    padding: 3px 6px;
+  }
+
+  .pod-name {
+    font-size: 11px;
+    word-break: break-all;
+  }
+
+  /* Adjust dashboard info */
+  .dashboard-description {
+    font-size: 12px;
+  }
+
+  .dashboard-description br {
+    display: none;
+  }
+
+  .dashboard-description small {
+    display: block;
+    margin-top: 4px;
+  }
+
+  /* Adjust toast for mobile */
+  .toast-notification {
+    max-width: calc(100% - 40px);
+    left: 20px;
+    right: 20px;
+    bottom: 10px;
+    text-align: center;
+    font-size: 13px;
+    padding: 10px 15px;
   }
 }
