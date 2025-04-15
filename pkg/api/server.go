@@ -1235,9 +1235,11 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	clientConfig := struct {
 		RefreshInterval int    `json:"refreshInterval"`
 		DashboardName   string `json:"dashboardName"`
+		Version         string `json:"version"`
 	}{
 		RefreshInterval: s.config.General.RefreshInterval,
 		DashboardName:   s.config.General.Name,
+		Version:         version.Version,
 	}
 
 	// Return JSON response

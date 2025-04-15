@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let wsReconnectTimeout = null;
   let wsReconnectAttempts = 0;
   let wsPingInterval = null; // Interval for sending ping messages
+  let version = '0.0.0';
 
   // Get the base path from the current URL
   // This handles cases where the app is hosted under a subpath
@@ -279,6 +280,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Update global state with the server-provided interval
       configuredRefreshInterval = config.refreshInterval || 30;
       dashboardName = config.dashboardName || 'Kubernetes Pod Monitor Dashboard';
+      version = config.version || '0.0.0';
 
       // Update displayed refresh text if dashboard is already visible
       if (dashboardInitialized) {
@@ -352,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="dashboard">
         <header class="dashboard-header">
           <h1>
-            <img src="${basePath}/logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo">
+            <img src="${basePath}/logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo"><span class="app-version">v${version}</span>
           </h1>
           <div class="dashboard-actions">
             <select class="namespace-selector" disabled>
@@ -374,7 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="dashboard">
         <header class="dashboard-header">
           <h1>
-            <img src="${basePath}/logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo">
+            <img src="${basePath}/logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo"><span class="app-version">v${version}</span>
           </h1>
           <div class="dashboard-actions">
             <select class="namespace-selector" disabled>
@@ -426,7 +428,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="dashboard">
         <header class="dashboard-header">
           <h1>
-            <img src="${basePath}/logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo">
+            <img src="${basePath}/logo.png" alt="Pod Monitoring Dashboard Logo" class="dashboard-logo"><span class="app-version">v${version}</span>
           </h1>
           <div class="dashboard-actions">
             <select class="namespace-selector" id="namespace-selector">

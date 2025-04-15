@@ -336,6 +336,16 @@ body {
   cursor: not-allowed;
 }
 
+.app-version{
+  position: absolute;
+  padding: 0.5rem 1rem;
+  border-radius: 1rem;
+  font-size: 0.5rem;
+  vertical-align: top;
+  font-weight: lighter;
+  font-family: monospace;
+}
+
 /* Dashboard info and last updated timestamp */
 .dashboard-info {
   display: flex;
