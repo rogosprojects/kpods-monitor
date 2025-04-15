@@ -1,4 +1,4 @@
-# Lightweight Kubernetes Pod Monitoring
+# ![](./ui/public/logomark.png) Lightweight Kubernetes Pod Monitoring
 
 ![Go Version](https://img.shields.io/badge/golang-1.24+-blue)
 ![License](https://img.shields.io/badge/license-MIT-orange)
