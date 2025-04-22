@@ -52,8 +52,30 @@ document.addEventListener('DOMContentLoaded', () => {
   async function init() {
     renderLoading();
     try {
+      // First check authentication by making a request to a protected endpoint
+      const authCheckResponse = await fetch(`${basePath}/api/config`);
+
+      // If we get a 401 Unauthorized, show an authentication error
+      if (authCheckResponse.status === 401) {
+        renderError('Authentication required. Please refresh the page and enter valid credentials when prompted. Do not press ESC when the authentication dialog appears.');
+        return;
+      }
+
+      // If we get any other error, show a general error
+      if (!authCheckResponse.ok) {
+        throw new Error(`HTTP error! status: ${authCheckResponse.status}`);
+      }
+
+      // Authentication successful, proceed with initialization
       // Fetch initial configuration
-      await fetchConfig();
+      const config = await authCheckResponse.json();
+      // Update global state with the server-provided interval
+      configuredRefreshInterval = config.refreshInterval || 30;
+      dashboardName = config.dashboardName || 'Kubernetes Pod Monitor Dashboard';
+      version = config.version || '0.0.0';
+
+      // Update config display if dashboard is already initialized
+      updateConfig();
 
       // Connect to WebSocket for live updates
       connectWebSocket();
@@ -158,6 +180,11 @@ document.addEventListener('DOMContentLoaded', () => {
     wsConnection.onerror = (error) => {
       console.error('WebSocket error:', error);
       updateConnectionStatus(false);
+
+      // If the dashboard isn't initialized yet, this could be an authentication error
+      if (!dashboardInitialized) {
+        renderError('Failed to establish connection. This may be due to an authentication issue. Please refresh the page and enter valid credentials when prompted.');
+      }
     };
   }
 
@@ -267,29 +294,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Fetch config from the server
-  async function fetchConfig() {
-    try {
-      // Fetch refresh interval from server config
-      const response = await fetch(`${basePath}/api/config`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const config = await response.json();
-
-      // Update global state with the server-provided interval
-      configuredRefreshInterval = config.refreshInterval || 30;
-      dashboardName = config.dashboardName || 'Kubernetes Pod Monitor Dashboard';
-      version = config.version || '0.0.0';
-
-      // Update displayed refresh text if dashboard is already visible
-      if (dashboardInitialized) {
-        updateRefreshIntervalText(configuredRefreshInterval);
-        updateDashboardName(dashboardName);
-      }
-    } catch (error) {
-      console.error('Error fetching config:', error);
-      // Fallback to 30 seconds if config fetch fails
+  // Update config display
+  function updateConfig() {
+    // Update displayed refresh text if dashboard is already visible
+    if (dashboardInitialized) {
+      updateRefreshIntervalText(configuredRefreshInterval);
+      updateDashboardName(dashboardName);
     }
   }
 

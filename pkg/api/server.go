@@ -384,8 +384,8 @@ func (s *Server) setupRoutes() {
 	apiRouter.HandleFunc("/namespaces", s.handleGetNamespaces).Methods("GET")
 	apiRouter.HandleFunc("/config", s.handleGetConfig).Methods("GET")
 
-	// WebSocket endpoint - register directly on the baseRouter to avoid middleware issues
-	baseRouter.HandleFunc("/api/ws", s.handleWebSocket).Methods("GET")
+	// WebSocket endpoint - register on the apiRouter to ensure authentication is applied
+	apiRouter.HandleFunc("/ws", s.handleWebSocket).Methods("GET")
 
 	// Health and monitoring endpoints - these are registered at the root level
 	// to ensure they're always accessible for health checks regardless of base path
