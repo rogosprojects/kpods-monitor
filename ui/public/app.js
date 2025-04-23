@@ -6,7 +6,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let isLoading = true;
   let lastUpdated = null;
   let dashboardInitialized = false;
-  let configuredRefreshInterval = 30; // Default value, will be updated from server
   let dashboardName = 'Kubernetes Pod Monitor Dashboard';
   let wsConnection = null;
   let wsReconnectTimeout = null;
@@ -69,8 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Authentication successful, proceed with initialization
       // Fetch initial configuration
       const config = await authCheckResponse.json();
-      // Update global state with the server-provided interval
-      configuredRefreshInterval = config.refreshInterval || 30;
+      // Update global state with the server-provided configuration
       dashboardName = config.dashboardName || 'Kubernetes Pod Monitor Dashboard';
       version = config.version || '0.0.0';
 
@@ -80,8 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Connect to WebSocket for live updates
       connectWebSocket();
 
-      // Still fetch initial data via HTTP in case WebSocket connection is slow
-      await fetchData(true);
+      // No need to fetch initial data via HTTP as we'll get it from WebSocket
     } catch (error) {
       console.error('Failed to initialize:', error);
       renderError('Failed to load dashboard data. Please try refreshing the page.');
@@ -238,67 +235,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Fetch data from the API (used as fallback and initial load)
-  async function fetchData(isInitialLoad = false) {
-    if (isInitialLoad) {
-      isLoading = true;
-    }
-
-    try {
-      // Simple HTTP fetch to get applications data
-      const url = `${basePath}/api/applications`;
-
-      // Fetch applications
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
-      const newApplications = data.applications || [];
-      lastUpdated = data.lastUpdated ? new Date(data.lastUpdated) : new Date();
-
-      // Fetch namespaces
-      const nsResponse = await fetch(`${basePath}/api/namespaces`);
-      if (nsResponse.ok) {
-        const newNamespaces = await nsResponse.json();
-        // Only rebuild namespace selector if namespaces changed
-        if (!arraysEqual(namespaces, newNamespaces)) {
-          namespaces = newNamespaces;
-          if (dashboardInitialized) {
-            updateNamespaceSelector();
-          }
-        }
-      }
-
-      // Update applications data
-      applications = newApplications;
-
-      // Initial load or rebuild needed
-      if (isInitialLoad || !dashboardInitialized) {
-        isLoading = false;
-        buildFullDashboard();
-      } else {
-        // Just update pods data and last updated time
-        updateLastUpdatedTime();
-        updateApplicationsData();
-      }
-
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      if (isInitialLoad) {
-        isLoading = false;
-        renderError('Failed to load data from the server.');
-      } else {
-        showToast('Failed to refresh data. Will try again later.');
-      }
-    }
-  }
+  // This function has been removed as we now rely exclusively on WebSockets for data updates
 
   // Update config display
   function updateConfig() {
-    // Update displayed refresh text if dashboard is already visible
+    // Update displayed dashboard name if dashboard is already visible
     if (dashboardInitialized) {
-      updateRefreshIntervalText(configuredRefreshInterval);
       updateDashboardName(dashboardName);
     }
   }
@@ -323,18 +265,12 @@ document.addEventListener('DOMContentLoaded', () => {
     return true;
   }
 
-  // Update the refresh interval text displayed on the dashboard
-  function updateRefreshIntervalText(seconds) {
-    configuredRefreshInterval = seconds; // Update the global variable
+  // Update the description text displayed on the dashboard
+  function updateDescriptionText() {
     const descriptionEl = document.querySelector('.dashboard-description small');
     if (descriptionEl) {
-      descriptionEl.textContent = `Data automatically refreshes every ${seconds} seconds with an active connection. Filter by namespace using the dropdown above.`;
+      descriptionEl.textContent = `Data updates in real-time with an active connection. Filter by namespace using the dropdown above.`;
     }
-  }
-
-  // Get the current refresh interval for display
-  function getRefreshIntervalText() {
-    return configuredRefreshInterval;
   }
 
   // Build and display a temporary toast notification
@@ -455,7 +391,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="dashboard-description">
             <strong>${dashboardName}</strong> - Real-time view of your pod statuses and health across applications.
             <br>
-            <small>Data automatically refreshes every ${getRefreshIntervalText()} seconds with an active connection. Filter by namespace using the dropdown above.</small>
+            <small>Data updates in real-time with an active connection. Filter by namespace using the dropdown above.</small>
           </div>
           <div class="last-updated" id="last-updated">
             <span class="refresh-icon">⟳</span>

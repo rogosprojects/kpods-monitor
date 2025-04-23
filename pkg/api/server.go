@@ -108,7 +108,9 @@ func (rl *RateLimiter) Cleanup() {
 type Server struct {
 	router    *mux.Router
 	collector *Collector
-	config    *models.Config
+	// InformerCollector for real-time updates
+	informerCollector *InformerCollector
+	config            *models.Config
 	// Internal cache of applications
 	applications []models.Application
 	mutex        sync.RWMutex
@@ -120,8 +122,9 @@ type Server struct {
 	clientsMutex  sync.Mutex
 	activeClients atomic.Int32
 	upgrader      websocket.Upgrader
-	ticker        *time.Ticker
-	tickerDone    chan struct{}
+	// Update channel for informer events
+	updateCh   chan struct{}
+	updateDone chan struct{}
 
 	// Connection limits
 	maxConnections int
@@ -156,15 +159,23 @@ func NewServer(config *models.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create collector: %w", err)
 	}
 
+	// Create the informer collector
+	informerCollector, err := NewInformerCollector(collector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create informer collector: %w", err)
+	}
+
 	server := &Server{
-		router:           mux.NewRouter(),
-		collector:        collector,
-		config:           config,
-		clients:          make(map[*websocketClient]bool),
-		tickerDone:       make(chan struct{}),
-		startTime:        time.Now(),
-		maxCacheSize:     100, // Maximum number of entries in caches
-		cacheAccessOrder: make([]string, 0, 100),
+		router:            mux.NewRouter(),
+		collector:         collector,
+		informerCollector: informerCollector,
+		config:            config,
+		clients:           make(map[*websocketClient]bool),
+		updateCh:          make(chan struct{}, 1),
+		updateDone:        make(chan struct{}),
+		startTime:         time.Now(),
+		maxCacheSize:      100, // Maximum number of entries in caches
+		cacheAccessOrder:  make([]string, 0, 100),
 		// Initialize connection tracking
 		maxConnections: 100, // Maximum concurrent connections
 		connsByIP:      make(map[string]int),
@@ -204,6 +215,14 @@ func NewServer(config *models.Config) (*Server, error) {
 	// Setup routes
 	server.setupRoutes()
 
+	// Start the informer collector
+	if err := informerCollector.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start informer collector: %w", err)
+	}
+
+	// Start the update listener
+	server.startUpdateListener()
+
 	// Do an initial data refresh
 	if err := server.refreshData(); err != nil {
 		log.Printf("Warning: initial data refresh failed: %v", err)
@@ -216,8 +235,8 @@ func NewServer(config *models.Config) (*Server, error) {
 func (s *Server) refreshData() error {
 	s.logger.Info("Refreshing application data...", nil)
 
-	// Collect application data
-	applications, err := s.collector.CollectApplications()
+	// Collect application data using the informer collector
+	applications, err := s.informerCollector.CollectApplications()
 	if err != nil {
 		s.logger.Error("Failed to collect applications", err, map[string]interface{}{
 			"last_successful_refresh": s.lastRefresh.Format(time.RFC3339),
@@ -380,7 +399,6 @@ func (s *Server) setupRoutes() {
 	// API routes
 	apiRouter.HandleFunc("/applications", s.handleGetApplications).Methods("GET")
 	apiRouter.HandleFunc("/applications/{name}", s.handleGetApplicationByName).Methods("GET")
-	apiRouter.HandleFunc("/refresh", s.handleRefresh).Methods("POST")
 	apiRouter.HandleFunc("/namespaces", s.handleGetNamespaces).Methods("GET")
 	apiRouter.HandleFunc("/config", s.handleGetConfig).Methods("GET")
 
@@ -469,82 +487,59 @@ func (s *Server) Start() error {
 		"base_path":              s.config.General.BasePath,
 		"auth_enabled":           s.config.General.Auth.Enabled,
 		"auth_type":              s.config.General.Auth.Type,
-		"refresh_interval":       time.Duration(s.config.General.RefreshInterval) * time.Second,
+		"using_informers":        true,
 		"max_connections":        s.maxConnections,
 		"max_connections_per_ip": 20,
 	})
+
+	// Ensure we clean up resources when the server exits
+	defer func() {
+		s.stopUpdateListener()
+		s.informerCollector.Stop()
+	}()
+
 	return http.ListenAndServe(fmt.Sprintf(":%d", port), s.router)
 }
 
-// startPolling starts the polling ticker when clients are connected
-func (s *Server) startPolling() {
-	// Stop any existing ticker
-	s.stopPolling()
+// startUpdateListener starts listening for updates from the informer collector
+func (s *Server) startUpdateListener() {
+	// Get the update channel from the informer collector
+	updateCh := s.informerCollector.GetUpdateChannel()
 
-	// Get refresh interval from config (with sane defaults)
-	interval := time.Duration(s.config.General.RefreshInterval) * time.Second
-	if interval < 5*time.Second {
-		interval = 30 * time.Second // Default to 30 seconds if config is too low
-		s.logger.Warn("Refresh interval too low, using default of 30 seconds", map[string]interface{}{
-			"configured_interval": s.config.General.RefreshInterval,
-		})
-	}
-
-	// Create a new ticker
-	s.ticker = time.NewTicker(interval)
-	s.tickerDone = make(chan struct{})
-
-	s.logger.Info("Starting Kubernetes polling", map[string]interface{}{
-		"interval": interval.String(),
-	})
-
-	// Start ticker goroutine
+	// Start a goroutine to listen for updates
 	go func() {
 		for {
 			select {
-			case <-s.ticker.C:
+			case <-updateCh:
+				// Only process updates if we have active clients
 				if s.activeClients.Load() > 0 {
-					s.logger.Info("Polling ticker triggered", map[string]interface{}{
+					s.logger.Info("Received update from informer", map[string]interface{}{
 						"active_clients": s.activeClients.Load(),
 					})
 
-					// Check if refresh is needed based on time since last refresh
-					s.mutex.RLock()
-					sinceLastRefresh := time.Since(s.lastRefresh)
-					s.mutex.RUnlock()
-
-					// Only refresh if enough time has passed (prevents excessive refreshes)
-					if sinceLastRefresh >= interval/2 {
-						if err := s.refreshData(); err != nil {
-							s.logger.Error("Error in polling refresh", err, map[string]interface{}{
-								"interval":                interval.String(),
-								"time_since_last_refresh": sinceLastRefresh.String(),
-							})
-						}
-					} else {
-						s.logger.Debug("Skipping refresh, last refresh too recent", map[string]interface{}{
-							"time_since_last_refresh": sinceLastRefresh.String(),
-							"minimum_interval":        (interval / 2).String(),
-						})
+					// Refresh data and broadcast to clients
+					if err := s.refreshData(); err != nil {
+						s.logger.Error("Error processing informer update", err, nil)
 					}
 				} else {
-					s.logger.Debug("Polling ticker triggered but no active clients", map[string]interface{}{
+					s.logger.Debug("Received update from informer but no active clients", map[string]interface{}{
 						"action": "skipping refresh",
 					})
 				}
-			case <-s.tickerDone:
+			case <-s.updateDone:
 				return
 			}
 		}
 	}()
 }
 
-// stopPolling stops the polling ticker
-func (s *Server) stopPolling() {
-	if s.ticker != nil {
-		s.ticker.Stop()
-		close(s.tickerDone)
-		s.ticker = nil
+// stopUpdateListener stops the update listener
+func (s *Server) stopUpdateListener() {
+	select {
+	case <-s.updateDone: // Already closed
+		return
+	default:
+		close(s.updateDone)
 	}
 }
 
@@ -724,7 +719,7 @@ func (s *Server) registerClient(client *websocketClient) {
 		"connect_time":   client.connectTime.Format(time.RFC3339),
 	})
 
-	// Start polling if this is the first client
+	// If this is the first client, perform an immediate refresh
 	if clientCount == 1 {
 		// Perform an immediate refresh to ensure fresh data
 		go func() {
@@ -734,9 +729,6 @@ func (s *Server) registerClient(client *websocketClient) {
 				})
 			}
 		}()
-
-		// Start the polling mechanism
-		s.startPolling()
 	}
 }
 
@@ -770,10 +762,9 @@ func (s *Server) unregisterClient(client *websocketClient) {
 			s.connsByIPMutex.Unlock()
 		}
 
-		// Stop polling if no clients left
+		// Log if no clients left
 		if clientCount == 0 {
-			s.logger.Info("No clients connected, stopping polling", nil)
-			s.stopPolling()
+			s.logger.Info("No clients connected", nil)
 		}
 	}
 }
@@ -1066,36 +1057,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// handleRefresh handles POST /api/refresh to force data refresh
-func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	// Only allow POST method
-	if r.Method != http.MethodPost {
-		ErrorResponse(w, StandardError{
-			Status:  http.StatusMethodNotAllowed,
-			Code:    "method_not_allowed",
-			Message: "Only POST method is allowed",
-		})
-		return
-	}
-
-	// Do a forced refresh
-	if err := s.refreshData(); err != nil {
-		log.Printf("Error during forced refresh: %v", err)
-		ErrorResponse(w, StandardError{
-			Status:  http.StatusInternalServerError,
-			Code:    "refresh_failed",
-			Message: "Failed to refresh data",
-		})
-		return
-	}
-
-	// Return success
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "Data refreshed successfully",
-	})
-}
+// Note: handleRefresh endpoint has been removed as we now use real-time updates via WebSockets
 
 // updateCacheAccess records an access to an item for LRU tracking
 func (s *Server) updateCacheAccess(key string) {
@@ -1233,13 +1195,11 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Create a client-facing config with only necessary information
 	clientConfig := struct {
-		RefreshInterval int    `json:"refreshInterval"`
-		DashboardName   string `json:"dashboardName"`
-		Version         string `json:"version"`
+		DashboardName string `json:"dashboardName"`
+		Version       string `json:"version"`
 	}{
-		RefreshInterval: s.config.General.RefreshInterval,
-		DashboardName:   s.config.General.Name,
-		Version:         version.Version,
+		DashboardName: s.config.General.Name,
+		Version:       version.Version,
 	}
 
 	// Return JSON response
@@ -1335,7 +1295,6 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		ApplicationCount  int           `json:"applicationCount"`
 		TotalPodCount     int           `json:"totalPodCount"`
 		LastRefreshTime   time.Time     `json:"lastRefreshTime"`
-		RefreshInterval   int           `json:"refreshInterval"`
 		Uptime            time.Duration `json:"uptime"`
 		ActiveConnections int32         `json:"activeConnections"`
 		CPUUsage          string        `json:"cpuUsage"`
@@ -1343,7 +1302,6 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}{
 		ApplicationCount:  appCount,
 		TotalPodCount:     podCount,
-		RefreshInterval:   s.config.General.RefreshInterval,
 		LastRefreshTime:   lastRefresh,
 		Uptime:            time.Since(s.startTime),
 		ActiveConnections: s.activeClients.Load(),

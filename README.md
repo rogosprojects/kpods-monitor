@@ -14,7 +14,7 @@ The system excels at detecting configuration discrepancies by highlighting missi
 ## ✨ Key Features
 
 - **Lightweight & Lightning Fast**: Uses minimal resources. Optimized Kubernetes API queries with efficient caching
-- **Real-time Updates**: WebSocket-based live updates with HTTP polling fallback
+- **Real-time Updates**: WebSocket-based live updates using Kubernetes Informers for improved efficiency
 - **Namespace Filtering**: Filter applications by namespace
 - **Resource Trend Indicators**: Visual indicators for increasing/decreasing resource usage
 - **Zero Dependencies**: Runs as a single binary, no external database required
@@ -100,8 +100,7 @@ applications:
   - name: "Frontend App"
     selector:
       production:
-        labels:
-          app: "frontend"
+        deployments: ["frontend-deployment"]
 ```
 
 ### Configuration Structure
@@ -127,49 +126,31 @@ applications:
 
 For each namespace, you can use any of the following selection methods:
 
-1. **Labels**: Select pods by their Kubernetes labels
-   ```yaml
-   selector:
-     production:
-       labels:
-         app: "frontend"
-         tier: "web"
-   ```
-
-2. **Deployments**: Select pods by deployment name (must match exactly)
+1. **Deployments**: Select pods by deployment name (must match exactly)
    ```yaml
    selector:
      production:
        deployments: ["frontend-deployment", "auth-deployment"]
    ```
 
-3. **StatefulSets**: Select pods by statefulset name (must match exactly)
+2. **StatefulSets**: Select pods by statefulset name (must match exactly)
    ```yaml
    selector:
      production:
        statefulSets: ["database", "queue"]
    ```
 
-4. **DaemonSets**: Select pods by daemonset name (must match exactly)
+3. **DaemonSets**: Select pods by daemonset name (must match exactly)
    ```yaml
    selector:
      production:
        daemonSets: ["logging-agent"]
    ```
 
-5. **Annotations**: Select pods by their annotations
-   ```yaml
-   selector:
-     production:
-       annotations:
-         "deployment.kubernetes.io/revision": "2"
-   ```
-
 **Important**:
-1. Each selector criteria uses an OR condition. If a pod matches ANY of the specified criteria, it will be included.
-2. Workload names (deployments, statefulSets, daemonSets) require exact matches. For example, specifying "api" will NOT match "api-gateway".
-3. You can specify different workloads for different namespaces within the same application.
-4. Missing workloads (defined in config but not found in cluster) will appear in light grey with "Unknown" status, and the application health will show a warning.
+1. Workload names (deployments, statefulSets, daemonSets) require exact matches. For example, specifying "api" will NOT match "api-gateway".
+2. You can specify different workloads for different namespaces within the same application.
+3. Missing workloads (defined in config but not found in cluster) will appear in light grey with "Unknown" status, and the application health will show a warning.
 
 ## Configuration Options
 
@@ -182,8 +163,8 @@ general:
   # Name of the dashboard instance
   name: "Kubernetes Pod Monitor"
 
-  # Dashboard refresh interval in seconds
-  refreshInterval: 30
+  # Base path for hosting the application (e.g., "/some-path")
+  basePath: ""
 
   # Port number for the dashboard server
   port: 8080
@@ -384,12 +365,25 @@ The dashboard sets appropriate security headers on all responses:
 - Permissions-Policy
 
 
+### Real-time Updates with Kubernetes Informers
+
+The dashboard uses Kubernetes Informers/Watch pattern instead of polling for improved efficiency:
+
+- Establishes a single connection to the Kubernetes API server
+- Receives real-time updates when resources change
+- Significantly reduces API server load compared to polling
+- Provides immediate notification of pod status changes
+- Uses WebSockets to push updates to clients in real-time
+
+Read more about Informers here: [Demystifying Kubernetes Informers
+](https://medium.com/@jeevanragula/demystifying-kubernetes-informer-streamlining-event-driven-workflows-955285166993)
+
 ### Metrics Collection
 
 The dashboard collects pod metrics using the Kubernetes Metrics API:
 
 - Automatically detects if metrics-server is available
-- Collects CPU and memory usage for each pod
+- Collects CPU and memory usage for each pod in efficient batches
 - Calculates usage trends based on historical data
 - Formats metrics in human-readable format (e.g., MiB, GiB)
 

@@ -7,9 +7,6 @@ general:
   #This simple configuration option provides important context to users and helps distinguish between different instances of the monitoring dashboard in multi-cluster or multi-environment setups.
   name: "Kubernetes Pod Monitor Dashboard"
 
-  # Refresh interval in seconds (how often data is fetched from Kubernetes)
-  refreshInterval: 30
-
   # HTTP server port
   port: 8080
 
@@ -107,13 +104,9 @@ applications:
     order: 40
     selector:
       monitoring:
-        # Select by labels
-        labels:
-          app: "monitoring"
-          component: "metrics"
-
-        # You can also specify specific deployments
+        # Specify deployments
         deployments:
+          - prometheus
           - grafana
           - alertmanager
 
@@ -128,22 +121,13 @@ applications:
           - node-exporter
           - fluentd
 
-        # Select by annotations
-        annotations:
-          "kubernetes.io/component": "system"
-
-  # Example 6: Mixed selection criteria
+  # Example 6: API Gateway
   - name: "API Gateway"
     description: "API Gateway and related services"
     order: 60
     selector:
       networking:
-        # You can combine different selection methods
+        # Specify deployments
         deployments:
           - api-gateway
           - rate-limiter
-
-        # Labels will select any pods matching these labels
-        labels:
-          app: "gateway"
-          tier: "frontend"

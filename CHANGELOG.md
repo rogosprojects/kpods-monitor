@@ -5,6 +5,25 @@ All notable changes to the kpods-monitor project will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-04-17
+
+### Added
+- Implemented Kubernetes Informers/Watch pattern for real-time updates
+- Enhanced WebSocket implementation for efficient client updates
+- Added custom metrics collector for efficient CPU and memory metrics collection
+
+### Changed
+- Replaced polling mechanism with Kubernetes Informers for improved efficiency
+- Removed manual refresh API endpoint in favor of real-time updates
+- Updated client-side code to rely exclusively on WebSockets
+- Consolidated metrics collection code to remove redundancy
+- Added server-side sorting of pods by name for consistent display order
+
+### Removed
+- Removed polling-related configuration and code
+- Removed startPolling function and related functionality
+- Removed support for pod collection by labels and annotations
+
 ## [0.1.4] - 2025-04-16
 
 ### Security

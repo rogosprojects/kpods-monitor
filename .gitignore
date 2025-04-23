@@ -33,3 +33,4 @@ yarn-error.log*
 
 .out/
 .ignore/
+config.yaml

@@ -6,7 +6,6 @@ import (
 	"kpods-monitor/pkg/log"
 	"kpods-monitor/pkg/logger"
 	"kpods-monitor/pkg/models"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -218,38 +217,6 @@ func (c *Collector) collectApplicationData(appConfig models.ApplicationConfig) (
 				pods, err := c.collectDaemonSetPods(ctx, namespace, selector.DaemonSets)
 				if err != nil {
 					logger.DefaultLogger.Error("Failed to collect daemonset pods", err, map[string]interface{}{
-						"namespace": namespace,
-					})
-					return
-				}
-				podsChan <- pods
-			}()
-		}
-
-		// 4. Process label selectors if provided
-		if len(selector.Labels) > 0 {
-			workloadWg.Add(1)
-			go func() {
-				defer workloadWg.Done()
-				pods, err := c.collectPodsByLabels(ctx, namespace, selector.Labels)
-				if err != nil {
-					logger.DefaultLogger.Error("Failed to collect pods by labels", err, map[string]interface{}{
-						"namespace": namespace,
-					})
-					return
-				}
-				podsChan <- pods
-			}()
-		}
-
-		// 5. Process annotation selectors if provided
-		if len(selector.Annotations) > 0 {
-			workloadWg.Add(1)
-			go func() {
-				defer workloadWg.Done()
-				pods, err := c.collectPodsByAnnotations(ctx, namespace, selector.Annotations)
-				if err != nil {
-					logger.DefaultLogger.Error("Failed to collect pods by annotations", err, map[string]interface{}{
 						"namespace": namespace,
 					})
 					return
@@ -613,72 +580,6 @@ func (c *Collector) collectDaemonSetPods(ctx context.Context, namespace string, 
 	return result, nil
 }
 
-// collectPodsByLabels collects pods that match the given labels
-func (c *Collector) collectPodsByLabels(ctx context.Context, namespace string, labels map[string]string) ([]models.Pod, error) {
-	var result []models.Pod
-
-	// Build label selector string
-	var labelSelector string
-	if len(labels) > 0 {
-		selectors := []string{}
-		for k, v := range labels {
-			selectors = append(selectors, fmt.Sprintf("%s=%s", k, v))
-		}
-		labelSelector = strings.Join(selectors, ",")
-	}
-
-	// Get pods with the label selector
-	podList, err := c.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: labelSelector,
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pods by labels: %w", err)
-	}
-
-	// Process each pod
-	for _, pod := range podList.Items {
-		// Determine the kind and owner name
-		kind, ownerName := c.determineOwner(pod)
-		modelPod := c.convertPod(pod, kind, ownerName)
-		result = append(result, modelPod)
-	}
-
-	return result, nil
-}
-
-// collectPodsByAnnotations collects pods that match the given annotations
-func (c *Collector) collectPodsByAnnotations(ctx context.Context, namespace string, annotations map[string]string) ([]models.Pod, error) {
-	var result []models.Pod
-
-	// We need to list all pods and filter by annotations, as Kubernetes API doesn't support annotation filtering
-	podList, err := c.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pods for annotation filtering: %w", err)
-	}
-
-	// Process each pod and check annotations
-	for _, pod := range podList.Items {
-		// Check if pod has all the required annotations
-		matches := true
-		for key, value := range annotations {
-			if podValue, exists := pod.Annotations[key]; !exists || podValue != value {
-				matches = false
-				break
-			}
-		}
-
-		if matches {
-			// Determine the kind and owner name
-			kind, ownerName := c.determineOwner(pod)
-			modelPod := c.convertPod(pod, kind, ownerName)
-			result = append(result, modelPod)
-		}
-	}
-
-	return result, nil
-}
-
 // determineOwner extracts the kind and name of the workload that owns this pod
 // Note: only for Pods collected by labels or annotations
 func (c *Collector) determineOwner(pod corev1.Pod) (string, string) {
@@ -747,8 +648,11 @@ func (c *Collector) convertPod(pod corev1.Pod, kind string, ownerName string) mo
 	// Count restarts
 	restarts := c.countRestarts(pod)
 
-	// Get CPU and memory usage from metrics-server if available
-	cpu, memory, cpuValue, memoryValue, cpuTrend, memoryTrend := c.getPodMetrics(pod.Namespace, pod.Name)
+	// Since metrics collection has been moved to metrics_collector.go,
+	// we'll use default values here as this code is no longer used
+	cpu, memory := "n/a", "n/a"
+	cpuValue, memoryValue := 0.0, 0.0
+	cpuTrend, memoryTrend := models.TrendStatic, models.TrendStatic
 
 	return models.Pod{
 		Name:        pod.Name,
@@ -832,190 +736,5 @@ func (c *Collector) countRestarts(pod corev1.Pod) int {
 	return total
 }
 
-// Metrics cache for tracking trends
-type metricsCacheEntry struct {
-	cpuValues    []float64
-	memoryValues []float64
-	timestamps   []time.Time
-	lastUpdated  time.Time
-}
-
-var (
-	podMetricsCache      = make(map[string]metricsCacheEntry)
-	podMetricsCacheMutex sync.RWMutex
-	numMetricSamples     = 3    // Number of samples to keep for trend calculation
-	cpuTrendThreshold    = 0.30 // percent threshold for CPU trend
-	memoryTrendThreshold = 0.10 // percent threshold for memory trend
-)
-
-// getPodMetrics fetches resource usage metrics for a pod
-func (c *Collector) getPodMetrics(namespace, name string) (string, string, float64, float64, models.TrendDirection, models.TrendDirection) {
-	if !c.metricsEnabled || c.metricsClient == nil {
-		return "n/a", "n/a", 0, 0, models.TrendStatic, models.TrendStatic
-	}
-
-	// Use a timeout context to prevent hanging
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Try to get pod metrics
-	podMetrics, err := c.metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(
-		ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return "n/a", "n/a", 0, 0, models.TrendStatic, models.TrendStatic
-	}
-
-	// Calculate total CPU and memory usage across all containers
-	var cpuUsage int64
-	var memoryUsage int64
-
-	for _, container := range podMetrics.Containers {
-		// CPU is in "n" format, typically in nanocores (n)
-		cpu := container.Usage.Cpu().MilliValue()
-		cpuUsage += cpu
-
-		// Memory is in bytes / KiB / MiB / GiB (Binary SI)
-		memory := container.Usage.Memory().Value()
-		memoryUsage += memory
-	}
-
-	// Get previous metrics from cache to calculate trend
-	cpuTrend := models.TrendStatic
-	memoryTrend := models.TrendStatic
-
-	// Look up previous values from cache
-	podKey := fmt.Sprintf("%s/%s", namespace, name)
-
-	// Read from cache with a read lock
-	podMetricsCacheMutex.RLock()
-	cacheEntry, exists := podMetricsCache[podKey]
-	podMetricsCacheMutex.RUnlock()
-
-	// Calculate trends using historical samples if we have cached data
-	if exists && len(cacheEntry.cpuValues) > 0 {
-		// Calculate CPU trend using historical samples
-		cpuTrend = calculateMetricTrend(cacheEntry.cpuValues, float64(cpuUsage), cpuTrendThreshold)
-
-		// Calculate memory trend using historical samples
-		memoryTrend = calculateMetricTrend(cacheEntry.memoryValues, float64(memoryUsage), memoryTrendThreshold)
-	}
-
-	// Update cache with current values for next time (using a write lock)
-	podMetricsCacheMutex.Lock()
-
-	if !exists {
-		// First time seeing this pod, initialize cache entry
-		podMetricsCache[podKey] = metricsCacheEntry{
-			cpuValues:    []float64{float64(cpuUsage)},
-			memoryValues: []float64{float64(memoryUsage)},
-			timestamps:   []time.Time{time.Now()},
-			lastUpdated:  time.Now(),
-		}
-	} else {
-		// Update existing cache entry
-		newCPUValues := append(cacheEntry.cpuValues, float64(cpuUsage))
-		newMemoryValues := append(cacheEntry.memoryValues, float64(memoryUsage))
-		newTimestamps := append(cacheEntry.timestamps, time.Now())
-
-		// Debug values lengths
-		// log.Printf("New CPU values length: %d", len(newCPUValues))
-		// log.Printf("New Memory values length: %d", len(newMemoryValues))
-		// log.Printf("New Timestamps length: %d", len(newTimestamps))
-		// Keep only the last numMetricSamples samples
-		if len(newCPUValues) > numMetricSamples {
-			newCPUValues = newCPUValues[len(newCPUValues)-numMetricSamples:]
-			newMemoryValues = newMemoryValues[len(newMemoryValues)-numMetricSamples:]
-			newTimestamps = newTimestamps[len(newTimestamps)-numMetricSamples:]
-		}
-
-		podMetricsCache[podKey] = metricsCacheEntry{
-			cpuValues:    newCPUValues,
-			memoryValues: newMemoryValues,
-			timestamps:   newTimestamps,
-			lastUpdated:  time.Now(),
-		}
-	}
-
-	podMetricsCacheMutex.Unlock()
-
-	// Format CPU and memory for display
-	cpuStr := fmt.Sprintf("%dm", cpuUsage)
-	memoryStr := formatMemory(memoryUsage)
-
-	return cpuStr, memoryStr, float64(cpuUsage), float64(memoryUsage), cpuTrend, memoryTrend
-}
-
-// calculateMetricTrend analyzes a series of historical values to determine the trend
-func calculateMetricTrend(historicalValues []float64, currentValue float64, threshold float64) models.TrendDirection {
-	if len(historicalValues) == 0 {
-		return models.TrendStatic
-	}
-
-	// If we only have one historical value, do a simple comparison
-	if len(historicalValues) == 1 {
-		change := currentValue - historicalValues[0]
-		percentChange := math.Abs(change) / historicalValues[0]
-
-		if percentChange < threshold {
-			return models.TrendStatic
-		} else if change > 0 {
-			return models.TrendUp
-		} else {
-			return models.TrendDown
-		}
-	}
-
-	// With multiple samples, calculate a more robust trend
-	allValues := append(historicalValues, currentValue)
-
-	// Calculate average change between consecutive samples
-	totalChange := 0.0
-	changeCount := 0
-
-	for i := 1; i < len(allValues); i++ {
-		if allValues[i-1] > 0 { // Avoid division by zero
-			change := allValues[i] - allValues[i-1]
-			percentChange := change / allValues[i-1]
-			totalChange += percentChange
-			changeCount++
-		}
-	}
-
-	// No valid changes to calculate trend
-	if changeCount == 0 {
-		return models.TrendStatic
-	}
-
-	// Calculate average percent change
-	avgPercentChange := totalChange / float64(changeCount)
-
-	// Determine trend based on average percent change
-	if math.Abs(avgPercentChange) < threshold {
-		return models.TrendStatic
-	} else if avgPercentChange > 0 {
-		return models.TrendUp
-	} else {
-		return models.TrendDown
-	}
-}
-
-// formatMemory converts bytes to human-readable format
-func formatMemory(bytes int64) string {
-	// Memory bytes are calculated with binary SI
-	// 1 KiB = 1024 bytes, 1 MiB = 1024 KiB, 1 GiB = 1024 MiB
-	const (
-		KiB = 1024
-		MiB = 1024 * KiB
-		GiB = 1024 * MiB
-	)
-
-	if bytes < KiB {
-		return fmt.Sprintf("%dB", bytes)
-	} else if bytes < MiB {
-		return fmt.Sprintf("%.1fKiB", float64(bytes)/KiB)
-	} else if bytes < GiB {
-		return fmt.Sprintf("%.1fMiB", float64(bytes)/MiB)
-	} else {
-		return fmt.Sprintf("%.1fGiB", float64(bytes)/GiB)
-	}
-}
+// Note: Metrics collection has been moved to metrics_collector.go
+// This code is kept for reference but is no longer used

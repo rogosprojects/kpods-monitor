@@ -17,9 +17,6 @@ type GeneralConfig struct {
 	// Name of the dashboard instance
 	Name string `json:"name" yaml:"name"`
 
-	// Dashboard refresh interval in seconds
-	RefreshInterval int `json:"refreshInterval" yaml:"refreshInterval"`
-
 	// Port number for the dashboard server
 	Port int `json:"port" yaml:"port"`
 

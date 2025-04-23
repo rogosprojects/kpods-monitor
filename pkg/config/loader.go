@@ -62,10 +62,6 @@ func (cl *ConfigLoader) validate(config *models.Config) error {
 		return fmt.Errorf("general.name is required")
 	}
 
-	if config.General.RefreshInterval <= 0 {
-		return fmt.Errorf("general.refreshInterval must be greater than 0")
-	}
-
 	if config.General.Port <= 0 || config.General.Port > 65535 {
 		return fmt.Errorf("general.port must be between 1 and 65535")
 	}
