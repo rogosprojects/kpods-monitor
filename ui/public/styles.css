@@ -248,6 +248,34 @@ body {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
+/* Container status styles */
+.container-status-wrapper {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  padding-top: 3px;
+}
+
+.container-status-segments {
+  display: flex;
+  height: 4px;
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+.container-status-segment {
+  flex: 1;
+  height: 100%;
+  margin: 0 1px;
+  border-radius: 1px;
+}
+
+.container-ready-count {
+  font-size: 10px;
+  font-weight: normal;
+  opacity: 0.9;
+}
+
 /* Restart indicators */
 
 .restarts-ok {
@@ -564,6 +592,20 @@ body {
     min-width: 60px;
     font-size: 11px;
     padding: 3px 6px;
+  }
+
+  .container-status-wrapper {
+    margin-top: 3px;
+    padding-top: 2px;
+  }
+
+  .container-status-segments {
+    height: 3px;
+    margin-bottom: 1px;
+  }
+
+  .container-ready-count {
+    font-size: 9px;
   }
 
   .pod-name {

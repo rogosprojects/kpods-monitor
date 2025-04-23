@@ -4,8 +4,12 @@ All notable changes to the kpods-monitor project will be documented in this file
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.2.1] - 2025-04-23
 
-## [0.2.0] - 2025-04-17
+### Added
+- Added container status visualization for Running pods to show individual container readiness (excluding init containers)
+
+## [0.2.0] - 2025-04-23
 
 ### Added
 - Implemented Kubernetes Informers/Watch pattern for real-time updates

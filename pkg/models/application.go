@@ -35,24 +35,36 @@ const (
 	TrendStatic TrendDirection = "static"
 )
 
+// ContainerStatus represents the status of a container in a pod
+type ContainerStatus struct {
+	Name    string `json:"name"`
+	Ready   bool   `json:"ready"`
+	Status  string `json:"status"` // running, waiting, terminated
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
 // Pod represents a Kubernetes pod in our application
 type Pod struct {
-	Name        string         `json:"name"`
-	Status      PodStatus      `json:"status"`
-	StartTime   time.Time      `json:"startTime"`
-	Age         string         `json:"age"` // Human readable age
-	Restarts    int            `json:"restarts"`
-	CPU         string         `json:"cpu"`         // CPU usage
-	CPUValue    float64        `json:"-"`           // CPU usage in millicores for internal use
-	CPUTrend    TrendDirection `json:"cpuTrend"`    // Direction of CPU usage trend
-	Memory      string         `json:"memory"`      // Memory usage
-	MemoryValue float64        `json:"-"`           // Memory usage in bytes for internal use
-	MemoryTrend TrendDirection `json:"memoryTrend"` // Direction of memory usage trend
-	Kind        string         `json:"kind"`        // Deployment, StatefulSet, DaemonSet, etc.
-	Namespace   string         `json:"namespace"`
-	Missing     bool           `json:"missing"`             // True if workload is in config but not found in cluster
-	ZeroPods    bool           `json:"zeroPods"`            // True if workload exists but has 0 running pods
-	OwnerName   string         `json:"ownerName,omitempty"` // Name of the owner workload (if applicable)
+	Name              string            `json:"name"`
+	Status            PodStatus         `json:"status"`
+	StartTime         time.Time         `json:"startTime"`
+	Age               string            `json:"age"` // Human readable age
+	Restarts          int               `json:"restarts"`
+	CPU               string            `json:"cpu"`         // CPU usage
+	CPUValue          float64           `json:"-"`           // CPU usage in millicores for internal use
+	CPUTrend          TrendDirection    `json:"cpuTrend"`    // Direction of CPU usage trend
+	Memory            string            `json:"memory"`      // Memory usage
+	MemoryValue       float64           `json:"-"`           // Memory usage in bytes for internal use
+	MemoryTrend       TrendDirection    `json:"memoryTrend"` // Direction of memory usage trend
+	Kind              string            `json:"kind"`        // Deployment, StatefulSet, DaemonSet, etc.
+	Namespace         string            `json:"namespace"`
+	Missing           bool              `json:"missing"`                     // True if workload is in config but not found in cluster
+	ZeroPods          bool              `json:"zeroPods"`                    // True if workload exists but has 0 running pods
+	OwnerName         string            `json:"ownerName,omitempty"`         // Name of the owner workload (if applicable)
+	ContainerStatuses []ContainerStatus `json:"containerStatuses,omitempty"` // Status of each container in the pod
+	TotalContainers   int               `json:"totalContainers"`             // Total number of containers in the pod
+	ReadyContainers   int               `json:"readyContainers"`             // Number of ready containers in the pod
 }
 
 // Application represents a group of related pods that form a logical application

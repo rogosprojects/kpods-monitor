@@ -808,20 +808,95 @@ func (ic *InformerCollector) convertPod(pod corev1.Pod, kind string, ownerName s
 	// Get CPU and memory usage from the metrics collector
 	cpu, memory, cpuValue, memoryValue, cpuTrend, memoryTrend := ic.metricsCollector.GetPodMetrics(pod.Namespace, pod.Name)
 
+	// Process container statuses
+	var containerStatuses []models.ContainerStatus
+	totalContainers := len(pod.Spec.Containers)
+	readyContainers := 0
+
+	// Map to track which containers we've seen in the status
+	seenContainers := make(map[string]bool)
+
+	// Map to identify init containers (we'll exclude these from the UI visualization)
+	initContainerMap := make(map[string]bool)
+	for _, initContainer := range pod.Spec.InitContainers {
+		initContainerMap[initContainer.Name] = true
+	}
+
+	// Process container statuses from the pod status
+	for _, containerStatus := range pod.Status.ContainerStatuses {
+		// Skip init containers for the UI visualization
+		if initContainerMap[containerStatus.Name] {
+			continue
+		}
+
+		seenContainers[containerStatus.Name] = true
+
+		// Determine container state
+		containerState := "unknown"
+		reason := ""
+		message := ""
+
+		if containerStatus.State.Running != nil {
+			containerState = "running"
+		} else if containerStatus.State.Waiting != nil {
+			containerState = "waiting"
+			reason = containerStatus.State.Waiting.Reason
+			message = containerStatus.State.Waiting.Message
+		} else if containerStatus.State.Terminated != nil {
+			containerState = "terminated"
+			reason = containerStatus.State.Terminated.Reason
+			message = containerStatus.State.Terminated.Message
+		}
+
+		// Add to container statuses
+		containerStatuses = append(containerStatuses, models.ContainerStatus{
+			Name:    containerStatus.Name,
+			Ready:   containerStatus.Ready,
+			Status:  containerState,
+			Reason:  reason,
+			Message: message,
+		})
+
+		// Count ready containers
+		if containerStatus.Ready {
+			readyContainers++
+		}
+	}
+
+	// Add init containers to the total count for metrics purposes
+	// but we won't display them in the UI
+	totalContainers += len(pod.Spec.InitContainers)
+
+	// Add entries for regular containers that don't have a status yet
+	for _, container := range pod.Spec.Containers {
+		if !seenContainers[container.Name] && !initContainerMap[container.Name] {
+			containerStatuses = append(containerStatuses, models.ContainerStatus{
+				Name:    container.Name,
+				Ready:   false,
+				Status:  "waiting",
+				Reason:  "ContainerCreating",
+				Message: "Container is being created",
+			})
+		}
+	}
+
 	return models.Pod{
-		Name:        pod.Name,
-		Status:      status,
-		StartTime:   pod.CreationTimestamp.Time,
-		Age:         age,
-		Restarts:    restarts,
-		CPU:         cpu,
-		CPUValue:    cpuValue,
-		CPUTrend:    cpuTrend,
-		Memory:      memory,
-		MemoryValue: memoryValue,
-		MemoryTrend: memoryTrend,
-		Kind:        kind, // Use the determined workload kind
-		Namespace:   pod.Namespace,
-		OwnerName:   ownerName, // Include the owner name for better identification
+		Name:              pod.Name,
+		Status:            status,
+		StartTime:         pod.CreationTimestamp.Time,
+		Age:               age,
+		Restarts:          restarts,
+		CPU:               cpu,
+		CPUValue:          cpuValue,
+		CPUTrend:          cpuTrend,
+		Memory:            memory,
+		MemoryValue:       memoryValue,
+		MemoryTrend:       memoryTrend,
+		Kind:              kind, // Use the determined workload kind
+		Namespace:         pod.Namespace,
+		OwnerName:         ownerName, // Include the owner name for better identification
+		ContainerStatuses: containerStatuses,
+		TotalContainers:   totalContainers,
+		ReadyContainers:   readyContainers,
 	}
 }

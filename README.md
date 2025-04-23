@@ -87,6 +87,7 @@ The application supports the following command-line options:
 
 - **Application Health**: Instantly see healthy, warning, or critical status
 - **Pod Details**: Status, age, restarts, CPU/memory with trend indicators
+- **Container Status**: Visual indicators for container readiness within pods
 - **Multi-Namespace View**: Group applications across namespaces
 - **Missing Workload Detection**: Quickly identify configuration issues
 - **Zero-Pod Workload Detection**: Find workloads without running pods
@@ -262,6 +263,18 @@ spec:
 ```
 
 ## Features Details
+
+### Container Status Visualization
+
+For pods in the "Running" state, the dashboard provides a detailed visualization of individual container statuses:
+
+- Color-coded segments show the status of each container within the pod
+- Green segments indicate ready containers
+- Orange segments indicate running but not ready containers
+- Red segments indicate containers in a waiting state (e.g., image pulling)
+- Gray segments indicate terminated containers
+
+This feature helps you quickly identify pods that are technically running but have containers that aren't ready yet, which can help diagnose issues with multi-container pods.
 
 ### Resource Usage Trend Indicators
 

@@ -527,13 +527,40 @@ document.addEventListener('DOMContentLoaded', () => {
       ? `${pod.memory} <span class="trend-indicator ${getTrendClass(pod.memoryTrend)}" title="Memory usage trend">${getTrendIndicator(pod.memoryTrend)}</span>`
       : pod.memory || 'N/A';
 
+    // Create container status indicators if available
+    let statusContent = '';
+
+    if (pod.containerStatuses && pod.containerStatuses.length > 0 && pod.status === 'Running') {
+      // Create a container status badge with segments
+      const containerStatusSegments = pod.containerStatuses.map(container => {
+        const statusColor = getContainerStatusColor(container.status, container.ready);
+        const title = `${container.name}: ${container.status}${container.reason ? ` (${container.reason})` : ''}`;
+        return `<div class="container-status-segment" style="background-color: ${statusColor}" title="${title}"></div>`;
+      }).join('');
+
+      // Create the container status badge with ready count
+      statusContent = `
+        <div class="status-indicator" style="background-color: ${getStatusColor(pod.status)}">
+          <span>${pod.status}</span>
+          <div class="container-status-wrapper">
+            <div class="container-status-segments">${containerStatusSegments}</div>
+          </div>
+        </div>
+      `;
+    } else {
+      // Use the standard status indicator for non-Running pods or those without container info
+      statusContent = `
+        <span class="status-indicator" style="background-color: ${getStatusColor(pod.status)}">
+          ${pod.status}
+        </span>
+      `;
+    }
+
     return `
       <tr class="${missingClass}">
         <td class="pod-name">${pod.name}</td>
         <td>
-          <span class="status-indicator" style="background-color: ${getStatusColor(pod.status)}">
-            ${pod.status}
-          </span>
+          ${statusContent}
         </td>
         <td>${pod.age || 'N/A'}</td>
         <td class="${restartClass}">
@@ -754,6 +781,22 @@ document.addEventListener('DOMContentLoaded', () => {
       case "Completed": return "blue";
       case "Unknown": return "#cbd5e0"; // Light grey for unknown/missing workloads
       default: return "grey";
+    }
+  }
+
+  // Get color for container status
+  function getContainerStatusColor(status, ready) {
+    // If container is ready, use green regardless of status
+    if (ready) {
+      return "#38a169"; // Green
+    }
+
+    // Otherwise, color based on status
+    switch(status) {
+      case "running": return "#f6ad55"; // Orange - running but not ready
+      case "waiting": return "#e53e3e"; // Red
+      case "terminated": return "#718096"; // Grey
+      default: return "#cbd5e0"; // Light grey for unknown
     }
   }
 
