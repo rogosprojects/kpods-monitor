@@ -394,9 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <small>Data updates in real-time with an active connection. Filter by namespace using the dropdown above.</small>
           </div>
           <div class="last-updated" id="last-updated">
-            <span class="refresh-icon">⟳</span>
-            Last updated: ${formattedTime}
-          </div>
+            <span class="refresh-icon">⟳</span> ${formattedTime}</div>
         </div>
 
         <div id="applications-area">
@@ -606,7 +604,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const lastUpdatedElement = document.getElementById('last-updated');
     if (lastUpdatedElement) {
       const formattedTime = lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : '';
-      lastUpdatedElement.innerHTML = `<span class="refresh-icon">⟳</span> Last updated: ${formattedTime}`;
+      lastUpdatedElement.innerHTML = `<span class="refresh-icon">⟳</span> ${formattedTime}`;
     }
   }
 

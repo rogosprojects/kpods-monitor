@@ -48,6 +48,11 @@ type InformerCollector struct {
 	// Channel for notifying about updates
 	updateCh chan struct{}
 
+	// Debounce timer for coalescing multiple updates
+	debounceTimer     *time.Timer
+	debounceTimerLock sync.Mutex
+	debounceInterval  time.Duration
+
 	// Context for controlling informers
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -72,7 +77,8 @@ func NewInformerCollector(collector *Collector) (*InformerCollector, error) {
 		metricsEnabled:   collector.metricsEnabled,
 		logger:           logger.DefaultLogger,
 		metricsCollector: metricsCollector,
-		updateCh:         make(chan struct{}, 1), // Buffered channel to prevent blocking
+		updateCh:         make(chan struct{}, 10), // Increased buffer size to handle more updates
+		debounceInterval: 500 * time.Millisecond,  // Debounce interval of 500ms
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -121,16 +127,33 @@ func NewInformerCollector(collector *Collector) (*InformerCollector, error) {
 	return ic, nil
 }
 
-// queueUpdate sends an update notification if one isn't already queued
+// queueUpdate sends an update notification with debouncing to coalesce multiple updates
 func (ic *InformerCollector) queueUpdate() {
-	// Non-blocking send to update channel
-	select {
-	case ic.updateCh <- struct{}{}:
-		// Successfully queued update
-		ic.logger.Debug("Queued update notification from informer", nil)
-	default:
-		// Channel already has an update queued, no need to send another
+	// Use debouncing to coalesce multiple updates within a short time window
+	ic.debounceTimerLock.Lock()
+	defer ic.debounceTimerLock.Unlock()
+
+	// If timer is already running, stop it and create a new one
+	if ic.debounceTimer != nil {
+		ic.debounceTimer.Stop()
 	}
+
+	// Create a new timer that will send the update after the debounce interval
+	ic.debounceTimer = time.AfterFunc(ic.debounceInterval, func() {
+		// When the timer fires, send the update
+		select {
+		case ic.updateCh <- struct{}{}:
+			// Successfully queued update
+			ic.logger.Debug("Queued update notification from informer (after debounce)", nil)
+		default:
+			// Channel already has an update queued, no need to send another
+			ic.logger.Debug("Update channel full, skipping update", nil)
+		}
+	})
+
+	ic.logger.Debug("Scheduled debounced update", map[string]interface{}{
+		"debounce_interval": ic.debounceInterval.String(),
+	})
 }
 
 // Start begins watching for Kubernetes resource changes

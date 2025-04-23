@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated client-side code to rely exclusively on WebSockets
 - Consolidated metrics collection code to remove redundancy
 - Added server-side sorting of pods by name for consistent display order
+- Implemented debouncing mechanism to prevent race conditions with high-volume updates
+- Increased update channel buffer size for better handling of concurrent updates
 
 ### Removed
 - Removed polling-related configuration and code
