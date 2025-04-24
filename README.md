@@ -171,6 +171,7 @@ general:
   port: 8080
 
   # Enable or disable debug logging
+  # When enabled, shows detailed information about client updates and their reasons
   debug: false
 
   # Base path for hosting the application (e.g., "/some-path")
@@ -387,9 +388,20 @@ The dashboard uses Kubernetes Informers/Watch pattern instead of polling for imp
 - Significantly reduces API server load compared to polling
 - Provides immediate notification of pod status changes
 - Uses WebSockets to push updates to clients in real-time
+- Includes detailed debug logging showing the reason for client updates (when debug mode is enabled)
 
 Read more about Informers here: [Demystifying Kubernetes Informers
 ](https://medium.com/@jeevanragula/demystifying-kubernetes-informer-streamlining-event-driven-workflows-955285166993)
+
+### Debug Logging
+
+When debug mode is enabled, the dashboard provides detailed logging about client updates:
+
+- Shows the specific reason for each client update (e.g., "Pod added", "Deployment updated")
+- Logs when updates are triggered by Kubernetes Informer events
+- Logs when updates are triggered by metrics changes
+- Logs when updates are triggered by client connections
+- Helps diagnose when and why clients are receiving updates
 
 ### Metrics Collection
 

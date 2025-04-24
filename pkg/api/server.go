@@ -233,13 +233,22 @@ func NewServer(config *models.Config) (*Server, error) {
 
 // refreshData updates the application data from Kubernetes
 func (s *Server) refreshData() error {
-	s.logger.Info("Refreshing application data...", nil)
+	// Get the reason for this update if available
+	updateReason := s.informerCollector.GetLastUpdateReason()
+	if updateReason == "" {
+		updateReason = "Manual refresh"
+	}
+
+	s.logger.Info("Refreshing application data...", map[string]interface{}{
+		"reason": updateReason,
+	})
 
 	// Collect application data using the informer collector
 	applications, err := s.informerCollector.CollectApplications()
 	if err != nil {
 		s.logger.Error("Failed to collect applications", err, map[string]interface{}{
 			"last_successful_refresh": s.lastRefresh.Format(time.RFC3339),
+			"reason":                  updateReason,
 		})
 		return fmt.Errorf("failed to collect applications: %w", err)
 	}
@@ -511,19 +520,26 @@ func (s *Server) startUpdateListener() {
 		for {
 			select {
 			case <-updateCh:
+				// Get the reason for this update
+				updateReason := s.informerCollector.GetLastUpdateReason()
+
 				// Only process updates if we have active clients
 				if s.activeClients.Load() > 0 {
 					s.logger.Info("Received update from informer", map[string]interface{}{
 						"active_clients": s.activeClients.Load(),
+						"reason":         updateReason,
 					})
 
 					// Refresh data and broadcast to clients
 					if err := s.refreshData(); err != nil {
-						s.logger.Error("Error processing informer update", err, nil)
+						s.logger.Error("Error processing informer update", err, map[string]interface{}{
+							"reason": updateReason,
+						})
 					}
 				} else {
 					s.logger.Debug("Received update from informer but no active clients", map[string]interface{}{
 						"action": "skipping refresh",
+						"reason": updateReason,
 					})
 				}
 			case <-s.updateDone:
@@ -723,9 +739,15 @@ func (s *Server) registerClient(client *websocketClient) {
 	if clientCount == 1 {
 		// Perform an immediate refresh to ensure fresh data
 		go func() {
+			s.logger.Debug("Triggering data refresh due to first client connection", map[string]interface{}{
+				"client_ip": client.ipAddress,
+				"reason":    "First client connected",
+			})
+
 			if err := s.refreshData(); err != nil {
 				s.logger.Error("Error in immediate refresh on client connect", err, map[string]interface{}{
 					"client_ip": client.ipAddress,
+					"reason":    "First client connected",
 				})
 			}
 		}()
@@ -921,7 +943,19 @@ func (s *Server) broadcastToClients() {
 		s.clientsMutex.Unlock()
 	}
 
-	log.Printf("Broadcasted updates to %d clients", len(clientsCopy))
+	// Get the reason for this update if available
+	updateReason := s.informerCollector.GetLastUpdateReason()
+	if updateReason == "" {
+		updateReason = "Manual refresh"
+	}
+
+	// Log the broadcast with the reason
+	s.logger.Debug("Broadcasted updates to clients", map[string]interface{}{
+		"client_count": len(clientsCopy),
+		"reason":       updateReason,
+	})
+
+	log.Printf("Broadcasted updates to %d clients (reason: %s)", len(clientsCopy), updateReason)
 }
 
 // handleGetApplications handles GET /api/applications

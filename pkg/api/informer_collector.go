@@ -60,6 +60,10 @@ type InformerCollector struct {
 	// State tracking
 	mutex   sync.RWMutex
 	running bool
+
+	// Track the reason for the most recent update
+	lastUpdateReason string
+	updateReasonLock sync.RWMutex
 }
 
 // NewInformerCollector creates a new collector that uses Kubernetes informers
@@ -101,37 +105,42 @@ func NewInformerCollector(collector *Collector) (*InformerCollector, error) {
 
 	// Add event handlers to trigger updates
 	ic.podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(obj interface{}) { ic.queueUpdate() },
-		UpdateFunc: func(old, new interface{}) { ic.queueUpdate() },
-		DeleteFunc: func(obj interface{}) { ic.queueUpdate() },
+		AddFunc:    func(obj interface{}) { ic.queueUpdate("Pod added") },
+		UpdateFunc: func(old, new interface{}) { ic.queueUpdate("Pod updated") },
+		DeleteFunc: func(obj interface{}) { ic.queueUpdate("Pod deleted") },
 	})
 
 	ic.deployInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(obj interface{}) { ic.queueUpdate() },
-		UpdateFunc: func(old, new interface{}) { ic.queueUpdate() },
-		DeleteFunc: func(obj interface{}) { ic.queueUpdate() },
+		AddFunc:    func(obj interface{}) { ic.queueUpdate("Deployment added") },
+		UpdateFunc: func(old, new interface{}) { ic.queueUpdate("Deployment updated") },
+		DeleteFunc: func(obj interface{}) { ic.queueUpdate("Deployment deleted") },
 	})
 
 	ic.statefulInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(obj interface{}) { ic.queueUpdate() },
-		UpdateFunc: func(old, new interface{}) { ic.queueUpdate() },
-		DeleteFunc: func(obj interface{}) { ic.queueUpdate() },
+		AddFunc:    func(obj interface{}) { ic.queueUpdate("StatefulSet added") },
+		UpdateFunc: func(old, new interface{}) { ic.queueUpdate("StatefulSet updated") },
+		DeleteFunc: func(obj interface{}) { ic.queueUpdate("StatefulSet deleted") },
 	})
 
 	ic.daemonsetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(obj interface{}) { ic.queueUpdate() },
-		UpdateFunc: func(old, new interface{}) { ic.queueUpdate() },
-		DeleteFunc: func(obj interface{}) { ic.queueUpdate() },
+		AddFunc:    func(obj interface{}) { ic.queueUpdate("DaemonSet added") },
+		UpdateFunc: func(old, new interface{}) { ic.queueUpdate("DaemonSet updated") },
+		DeleteFunc: func(obj interface{}) { ic.queueUpdate("DaemonSet deleted") },
 	})
 
 	return ic, nil
 }
 
 // queueUpdate sends an update notification with debouncing to coalesce multiple updates
-func (ic *InformerCollector) queueUpdate() {
+func (ic *InformerCollector) queueUpdate(reason string) {
 	// Use debouncing to coalesce multiple updates within a short time window
 	ic.debounceTimerLock.Lock()
 	defer ic.debounceTimerLock.Unlock()
+
+	// Store the reason for this update
+	ic.updateReasonLock.Lock()
+	ic.lastUpdateReason = reason
+	ic.updateReasonLock.Unlock()
 
 	// If timer is already running, stop it and create a new one
 	if ic.debounceTimer != nil {
@@ -144,14 +153,19 @@ func (ic *InformerCollector) queueUpdate() {
 		select {
 		case ic.updateCh <- struct{}{}:
 			// Successfully queued update
-			ic.logger.Debug("Queued update notification from informer (after debounce)", nil)
+			ic.logger.Debug("Queued update notification from informer (after debounce)", map[string]interface{}{
+				"reason": reason,
+			})
 		default:
 			// Channel already has an update queued, no need to send another
-			ic.logger.Debug("Update channel full, skipping update", nil)
+			ic.logger.Debug("Update channel full, skipping update", map[string]interface{}{
+				"reason": reason,
+			})
 		}
 	})
 
 	ic.logger.Debug("Scheduled debounced update", map[string]interface{}{
+		"reason":            reason,
 		"debounce_interval": ic.debounceInterval.String(),
 	})
 }
@@ -187,7 +201,7 @@ func (ic *InformerCollector) Start() error {
 	ic.logger.Info("Kubernetes informers started successfully", nil)
 
 	// Queue an initial update
-	ic.queueUpdate()
+	ic.queueUpdate("Initial startup")
 
 	return nil
 }
@@ -201,7 +215,7 @@ func (ic *InformerCollector) listenForMetricsUpdates() {
 		case <-metricsUpdateCh:
 			// When metrics have significant changes, queue an update
 			ic.logger.Debug("Received metrics update, queueing data refresh", nil)
-			ic.queueUpdate()
+			ic.queueUpdate("Metrics update")
 		case <-ic.ctx.Done():
 			// Context cancelled, stop listening
 			return
@@ -230,6 +244,13 @@ func (ic *InformerCollector) Stop() {
 // GetUpdateChannel returns the channel that signals when updates are available
 func (ic *InformerCollector) GetUpdateChannel() <-chan struct{} {
 	return ic.updateCh
+}
+
+// GetLastUpdateReason returns the reason for the most recent update
+func (ic *InformerCollector) GetLastUpdateReason() string {
+	ic.updateReasonLock.RLock()
+	defer ic.updateReasonLock.RUnlock()
+	return ic.lastUpdateReason
 }
 
 // CollectApplications gathers data for all configured applications using the cached data
