@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsv "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
@@ -149,20 +150,48 @@ func NewInformerCollector(collector *Collector) (*InformerCollector, error) {
 		podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				if pod, ok := obj.(*corev1.Pod); ok {
-					ic.queueUpdate(fmt.Sprintf("Pod added: %s/%s", pod.Namespace, pod.Name))
+					// Only queue updates for pods that are part of configured workloads
+					if ic.isPodWatched(pod.Namespace, pod.Name) {
+						ic.queueUpdate(fmt.Sprintf("Pod added: %s/%s", pod.Namespace, pod.Name))
+					} else {
+						ic.logger.Debug("Ignoring pod add event - not part of watched workloads", map[string]interface{}{
+							"pod": fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
+						})
+					}
 				}
 			},
 			UpdateFunc: func(old, new interface{}) {
 				if pod, ok := new.(*corev1.Pod); ok {
-					ic.queueUpdate(fmt.Sprintf("Pod updated: %s/%s", pod.Namespace, pod.Name))
+					// Only queue updates for pods that are part of configured workloads
+					if ic.isPodWatched(pod.Namespace, pod.Name) {
+						ic.queueUpdate(fmt.Sprintf("Pod updated: %s/%s", pod.Namespace, pod.Name))
+					} else {
+						ic.logger.Debug("Ignoring pod update event - not part of watched workloads", map[string]interface{}{
+							"pod": fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
+						})
+					}
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
 				if pod, ok := obj.(*corev1.Pod); ok {
-					ic.queueUpdate(fmt.Sprintf("Pod deleted: %s/%s", pod.Namespace, pod.Name))
+					// Only queue updates for pods that are part of configured workloads
+					if ic.isPodWatched(pod.Namespace, pod.Name) {
+						ic.queueUpdate(fmt.Sprintf("Pod deleted: %s/%s", pod.Namespace, pod.Name))
+					} else {
+						ic.logger.Debug("Ignoring pod delete event - not part of watched workloads", map[string]interface{}{
+							"pod": fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
+						})
+					}
 				} else if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
 					if pod, ok := tombstone.Obj.(*corev1.Pod); ok {
-						ic.queueUpdate(fmt.Sprintf("Pod deleted: %s/%s", pod.Namespace, pod.Name))
+						// Only queue updates for pods that are part of configured workloads
+						if ic.isPodWatched(pod.Namespace, pod.Name) {
+							ic.queueUpdate(fmt.Sprintf("Pod deleted: %s/%s", pod.Namespace, pod.Name))
+						} else {
+							ic.logger.Debug("Ignoring pod delete event - not part of watched workloads", map[string]interface{}{
+								"pod": fmt.Sprintf("%s/%s", pod.Namespace, pod.Name),
+							})
+						}
 					}
 				}
 			},
@@ -239,6 +268,21 @@ func NewInformerCollector(collector *Collector) (*InformerCollector, error) {
 	}
 
 	return ic, nil
+}
+
+// isPodWatched checks if a pod belongs to a workload that's configured to be displayed
+// This is a wrapper around the MetricsCollector's isPodWatched method to avoid code duplication
+func (ic *InformerCollector) isPodWatched(namespace, podName string) bool {
+	// Create a fake PodMetrics object with just the namespace and name
+	fakePodMetrics := &metricsv1beta1.PodMetrics{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: namespace,
+		},
+	}
+
+	// Use the MetricsCollector's isPodWatched method
+	return ic.metricsCollector.IsPodWatched(fakePodMetrics)
 }
 
 // queueUpdate sends an update notification with debouncing to coalesce multiple updates

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added notification history panel to view past notifications
 - Implemented notification grouping to prevent notification overload
 - Added different notification icons based on severity (error, warning, critical, etc.)
+- Optimized WebSocket notifications to only send updates for pods that are configured to be displayed
 
 ## [0.2.2] - 2025-04-24
 

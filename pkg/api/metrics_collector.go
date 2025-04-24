@@ -177,8 +177,9 @@ func (mc *MetricsCollector) GetLastUpdateReason() string {
 	return mc.lastUpdateReason
 }
 
-// isPodWatched checks if a pod belongs to a watched workload
-func (mc *MetricsCollector) isPodWatched(podMetrics *metricsv1beta1.PodMetrics) bool {
+// IsPodWatched checks if a pod belongs to a watched workload
+// This is exported so it can be reused by other components
+func (mc *MetricsCollector) IsPodWatched(podMetrics *metricsv1beta1.PodMetrics) bool {
 	namespace := podMetrics.Namespace
 
 	// Check if we're watching this namespace
@@ -368,7 +369,7 @@ func (mc *MetricsCollector) collectAllMetrics() {
 		}
 
 		// Skip pods that don't belong to watched workloads
-		if !mc.isPodWatched(podMetricsObj) {
+		if !mc.IsPodWatched(podMetricsObj) {
 			mc.logger.Debug("Skipping pod metrics - not part of watched workloads", map[string]interface{}{
 				"pod": fmt.Sprintf("%s/%s", podMetricsObj.Namespace, podMetricsObj.Name),
 			})
