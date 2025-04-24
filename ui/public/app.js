@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let wsPingInterval = null; // Interval for sending ping messages
   let version = '0.0.0';
 
+
   // Get the base path from the current URL
   // This handles cases where the app is hosted under a subpath
   const getBasePath = () => {
@@ -149,6 +150,98 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           updateLastUpdatedTime();
           updateApplicationsData();
+
+          // Show notification for the update if dashboard is initialized
+          if (dashboardInitialized) {
+            // Extract update reason from the data if available
+            const updateReason = data.updateReason || '';
+
+            // Only show notifications for pod/container status changes, not metrics updates
+            if (updateReason && !updateReason.toLowerCase().includes('metrics')) {
+              // Check if the update includes a specific pod
+              if (updateReason.includes('pod:')) {
+                // Extract pod name from the update reason
+                const podMatch = updateReason.match(/pod:\s*([^\s]+)/);
+                if (podMatch && podMatch[1]) {
+                  const podName = podMatch[1];
+
+                  // Determine notification type based on content
+                  let notificationType = 'info';
+                  let notificationDuration = 2500;
+
+                  // Check for different types of status changes
+                  if (updateReason.toLowerCase().includes('error') ||
+                      updateReason.toLowerCase().includes('fail')) {
+                    notificationType = 'error';
+                    notificationDuration = 4000; // Show errors longer
+                  } else if (updateReason.toLowerCase().includes('warn')) {
+                    notificationType = 'warning';
+                    notificationDuration = 3000;
+                  } else if (updateReason.toLowerCase().includes('created')) {
+                    notificationType = 'success';
+                  } else if (updateReason.toLowerCase().includes('deleted') ||
+                             updateReason.toLowerCase().includes('terminating')) {
+                    notificationType = 'warning';
+                  } else if (updateReason.toLowerCase().includes('crash') ||
+                             updateReason.toLowerCase().includes('backoff')) {
+                    notificationType = 'critical';
+                    notificationDuration = 4000;
+                  } else if (updateReason.toLowerCase().includes('security')) {
+                    notificationType = 'security';
+                    notificationDuration = 4000;
+                  } else if (updateReason.toLowerCase().includes('network')) {
+                    notificationType = 'network';
+                  } else if (updateReason.toLowerCase().includes('system')) {
+                    notificationType = 'system';
+                  }
+
+                  // Check if this is a status change notification
+                  if (updateReason.toLowerCase().includes('status') ||
+                      updateReason.toLowerCase().includes('created') ||
+                      updateReason.toLowerCase().includes('deleted') ||
+                      updateReason.toLowerCase().includes('updated')) {
+                    showToast(`Pod ${podName} status changed`, notificationType, notificationDuration);
+                  }
+                }
+              } else if (updateReason.toLowerCase().includes('status') ||
+                         updateReason.toLowerCase().includes('created') ||
+                         updateReason.toLowerCase().includes('deleted') ||
+                         updateReason.toLowerCase().includes('updated')) {
+                // Determine notification type based on content
+                let notificationType = 'info';
+                let notificationDuration = 2500;
+
+                // Check for different types of status changes
+                if (updateReason.toLowerCase().includes('error') ||
+                    updateReason.toLowerCase().includes('fail')) {
+                  notificationType = 'error';
+                  notificationDuration = 4000; // Show errors longer
+                } else if (updateReason.toLowerCase().includes('warn')) {
+                  notificationType = 'warning';
+                  notificationDuration = 3000;
+                } else if (updateReason.toLowerCase().includes('created')) {
+                  notificationType = 'success';
+                } else if (updateReason.toLowerCase().includes('deleted') ||
+                           updateReason.toLowerCase().includes('terminating')) {
+                  notificationType = 'warning';
+                } else if (updateReason.toLowerCase().includes('crash') ||
+                           updateReason.toLowerCase().includes('backoff')) {
+                  notificationType = 'critical';
+                  notificationDuration = 4000;
+                } else if (updateReason.toLowerCase().includes('security')) {
+                  notificationType = 'security';
+                  notificationDuration = 4000;
+                } else if (updateReason.toLowerCase().includes('network')) {
+                  notificationType = 'network';
+                } else if (updateReason.toLowerCase().includes('system')) {
+                  notificationType = 'system';
+                }
+
+                // Show a notification for other status changes
+                showToast(`Update: ${updateReason}`, notificationType, notificationDuration);
+              }
+            }
+          }
         }
       } catch (error) {
         console.error('Error processing WebSocket message:', error);
@@ -273,25 +366,507 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Build and display a temporary toast notification
-  function showToast(message) {
-    // Create toast element if it doesn't exist
-    let toast = document.getElementById('toast-notification');
-    if (!toast) {
-      toast = document.createElement('div');
-      toast.id = 'toast-notification';
-      toast.className = 'toast-notification';
-      document.body.appendChild(toast);
-    }
+  // Call this function when building the dashboard
+  function buildDashboardDescription() {
+    updateDescriptionText();
+  }
 
-    // Set message and show
-    toast.textContent = message;
-    toast.classList.add('show');
+  // Enhanced notification manager with history and grouping
+  const notificationManager = {
+    container: null,
+    maxToasts: 3,
+    toasts: [],
+    history: [],
+    maxHistory: 50,
+    historyPanel: null,
+    historyToggle: null,
+    unreadCount: 0,
+    groupedNotifications: {}, // For tracking grouped notifications
+    initialized: false,
 
-    // Hide after 3 seconds
-    setTimeout(() => {
+    // Initialize the notification system immediately at page load
+    initializeOnLoad() {
+      // Only initialize once
+      if (this.initialized) return;
+
+      // Create toast container
+      this.container = document.createElement('div');
+      this.container.className = 'toast-container';
+      document.body.appendChild(this.container);
+
+      // Create history toggle button (bell icon)
+      this.historyToggle = document.createElement('div');
+      this.historyToggle.className = 'notification-history-toggle';
+      this.historyToggle.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+        </svg>
+        <span class="badge" style="display: none;">0</span>
+      `;
+
+      // Add click event to toggle history panel
+      this.historyToggle.addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent clicks from propagating to document
+        this.toggleHistoryPanel();
+      });
+
+      // Create history panel
+      this.historyPanel = document.createElement('div');
+      this.historyPanel.className = 'notification-history-panel';
+      this.historyPanel.innerHTML = `
+        <div class="notification-history-header">
+          <div class="notification-history-title">Notification History</div>
+          <div class="notification-history-actions">
+            <button class="notification-history-action clear-all">Clear All</button>
+            <button class="notification-history-action mark-read">Mark All Read</button>
+          </div>
+        </div>
+        <div class="notification-history-list"></div>
+      `;
+
+      // Create a wrapper for the bell and panel to maintain proper positioning
+      this.notificationWrapper = document.createElement('div');
+      this.notificationWrapper.className = 'notification-wrapper';
+      this.notificationWrapper.style.position = 'relative';
+      this.notificationWrapper.style.display = 'flex';
+      this.notificationWrapper.style.alignItems = 'center';
+      this.notificationWrapper.appendChild(this.historyToggle);
+      this.notificationWrapper.appendChild(this.historyPanel);
+
+      // Add the bell to the header
+      this.addBellToHeader();
+
+      // Add event listeners for actions
+      const clearAllBtn = this.historyPanel.querySelector('.clear-all');
+      if (clearAllBtn) {
+        clearAllBtn.addEventListener('click', () => {
+          this.clearHistory();
+        });
+      }
+
+      const markReadBtn = this.historyPanel.querySelector('.mark-read');
+      if (markReadBtn) {
+        markReadBtn.addEventListener('click', () => {
+          this.markAllAsRead();
+        });
+      }
+
+      // Close panel when clicking outside
+      document.addEventListener('click', (event) => {
+        if (!this.historyPanel.contains(event.target) &&
+            !this.historyToggle.contains(event.target) &&
+            this.historyPanel.classList.contains('show')) {
+          this.toggleHistoryPanel(false);
+        }
+      });
+
+      // Load history from localStorage if available
+      this.loadHistory();
+
+      // Mark as initialized
+      this.initialized = true;
+    },
+
+    // Initialize the notification system if needed
+    init() {
+      if (!this.initialized) {
+        this.initializeOnLoad();
+      }
+    },
+
+    // Toggle the history panel
+    toggleHistoryPanel(show) {
+      if (show === undefined) {
+        show = !this.historyPanel.classList.contains('show');
+      }
+
+      if (show) {
+        this.historyPanel.classList.add('show');
+        this.renderHistory();
+        this.markAllAsRead();
+      } else {
+        this.historyPanel.classList.remove('show');
+      }
+    },
+
+    // Render the notification history
+    renderHistory() {
+      const listEl = this.historyPanel.querySelector('.notification-history-list');
+      if (!listEl) return;
+
+      // Clear the list
+      listEl.innerHTML = '';
+
+      // Show empty message if no history
+      if (this.history.length === 0) {
+        listEl.innerHTML = '<div class="notification-history-empty">No notifications yet</div>';
+        return;
+      }
+
+      // Add history items
+      for (const item of this.history) {
+        const historyItem = document.createElement('div');
+        historyItem.className = 'notification-history-item';
+
+        // Create icon based on severity/type
+        let icon = '';
+        switch (item.type) {
+          case 'info': icon = 'ℹ️'; break;
+          case 'success': icon = '✅'; break;
+          case 'warning': icon = '⚠️'; break;
+          case 'error': icon = '❌'; break;
+          case 'critical': icon = '🔴'; break;
+          case 'system': icon = '🔧'; break;
+          case 'network': icon = '🌐'; break;
+          case 'security': icon = '🔒'; break;
+        }
+
+        // Format time
+        const time = this.formatTime(new Date(item.timestamp));
+
+        // Add group count if this is a grouped notification
+        const groupCountHtml = item.count > 1
+          ? `<span class="notification-group-count">${item.count}</span>`
+          : '';
+
+        historyItem.innerHTML = `
+          <span class="toast-icon">${icon}</span>
+          <span class="notification-content">${item.message}${groupCountHtml}</span>
+          <span class="notification-time">${time}</span>
+        `;
+
+        listEl.appendChild(historyItem);
+      }
+    },
+
+    // Format time for display
+    formatTime(date) {
+      const now = new Date();
+      const diffMs = now - date;
+      const diffSec = Math.floor(diffMs / 1000);
+      const diffMin = Math.floor(diffSec / 60);
+      const diffHour = Math.floor(diffMin / 60);
+
+      if (diffSec < 60) {
+        return 'just now';
+      } else if (diffMin < 60) {
+        return `${diffMin}m ago`;
+      } else if (diffHour < 24) {
+        return `${diffHour}h ago`;
+      } else {
+        return date.toLocaleString();
+      }
+    },
+
+    // Clear all history
+    clearHistory() {
+      this.history = [];
+      this.saveHistory();
+      this.renderHistory();
+      this.updateUnreadCount(0);
+    },
+
+    // Mark all notifications as read
+    markAllAsRead() {
+      this.updateUnreadCount(0);
+    },
+
+    // Update the unread count badge
+    updateUnreadCount(count) {
+      if (count !== undefined) {
+        this.unreadCount = count;
+      }
+
+      const badge = this.historyToggle.querySelector('.badge');
+      if (badge) {
+        badge.textContent = this.unreadCount;
+        badge.style.display = this.unreadCount > 0 ? 'flex' : 'none';
+      }
+    },
+
+    // Save history to localStorage
+    saveHistory() {
+      try {
+        localStorage.setItem('notification_history', JSON.stringify(this.history));
+      } catch (e) {
+        console.error('Failed to save notification history:', e);
+      }
+    },
+
+    // Load history from localStorage
+    loadHistory() {
+      try {
+        const saved = localStorage.getItem('notification_history');
+        if (saved) {
+          this.history = JSON.parse(saved);
+        }
+      } catch (e) {
+        console.error('Failed to load notification history:', e);
+        this.history = [];
+      }
+    },
+
+    // Add the bell icon to the header
+    addBellToHeader() {
+      // Function to try adding the bell to the header
+      const tryAddingBell = () => {
+        // Look for the notification bell container
+        const bellContainer = document.getElementById('notification-bell-container');
+        if (bellContainer) {
+          // Clear any existing content
+          bellContainer.innerHTML = '';
+          // Add the notification wrapper to the container
+          bellContainer.appendChild(this.notificationWrapper);
+          return true;
+        }
+        return false;
+      };
+
+      // Try immediately (might work if the dashboard is already built)
+      if (tryAddingBell()) {
+        return;
+      }
+
+      // If not successful, set up a mutation observer to watch for DOM changes
+      const observer = new MutationObserver(() => {
+        if (tryAddingBell()) {
+          // Once we've successfully added the bell, disconnect the observer
+          observer.disconnect();
+        }
+      });
+
+      // Start observing the document body for changes
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+
+      // Also set a timeout to retry a few times, in case the mutation observer doesn't catch it
+      let attempts = 0;
+      const maxAttempts = 10;
+      const retryInterval = setInterval(() => {
+        if (tryAddingBell() || ++attempts >= maxAttempts) {
+          clearInterval(retryInterval);
+        }
+      }, 500);
+    },
+
+    // Check if a notification should be grouped with existing ones
+    shouldGroup(message, type) {
+      // Simple grouping logic: group by message prefix (first 15 chars) and type
+      const prefix = message.substring(0, 15);
+      const key = `${prefix}:${type}`;
+
+      // Check if we have a recent notification with the same prefix
+      const existingGroup = this.groupedNotifications[key];
+      if (existingGroup) {
+        const now = new Date();
+        // Group if the last notification was less than 30 seconds ago
+        if ((now - existingGroup.lastUpdate) < 30000) {
+          return key;
+        }
+      }
+
+      return null;
+    },
+
+    // Update a grouped notification
+    updateGroupedNotification(groupKey, message) {
+      const group = this.groupedNotifications[groupKey];
+      if (!group) return null;
+
+      // Update the group
+      group.count++;
+      group.lastUpdate = new Date();
+
+      // Update the toast if it exists
+      if (group.toast && group.toast.parentNode) {
+        const countEl = group.toast.querySelector('.notification-group-count');
+        if (countEl) {
+          countEl.textContent = group.count;
+        } else {
+          const contentEl = group.toast.querySelector('.toast-content');
+          if (contentEl) {
+            contentEl.innerHTML = `${group.message} <span class="notification-group-count">${group.count}</span>`;
+          }
+        }
+      }
+
+      // Update the history item
+      for (let i = 0; i < this.history.length; i++) {
+        if (this.history[i].id === group.id) {
+          this.history[i].count = group.count;
+          this.history[i].message = message; // Update with latest message
+          this.saveHistory();
+          break;
+        }
+      }
+
+      return group.toast;
+    },
+
+    // Show a toast notification
+    show(message, type = 'info', duration = 3000) {
+      this.init();
+
+      // Check if this notification should be grouped
+      const groupKey = this.shouldGroup(message, type);
+      if (groupKey) {
+        const existingToast = this.updateGroupedNotification(groupKey, message);
+        if (existingToast) {
+          // Reset the auto-dismiss timer
+          if (existingToast.dismissTimer) {
+            clearTimeout(existingToast.dismissTimer);
+          }
+
+          if (duration > 0) {
+            existingToast.dismissTimer = setTimeout(() => {
+              this.dismiss(existingToast);
+            }, duration);
+          }
+
+          return existingToast;
+        }
+      }
+
+      // Create a new notification ID
+      const notificationId = Date.now().toString();
+
+      // Create toast element
+      const toast = document.createElement('div');
+      toast.className = `toast-notification ${type}`;
+      toast.dataset.id = notificationId;
+
+      // Create toast content with severity-based icons
+      let icon = '';
+      switch (type) {
+        case 'info': icon = 'ℹ️'; break;
+        case 'success': icon = '✅'; break;
+        case 'warning': icon = '⚠️'; break;
+        case 'error': icon = '❌'; break;
+        case 'critical': icon = '🔴'; break;
+        case 'system': icon = '🔧'; break;
+        case 'network': icon = '🌐'; break;
+        case 'security': icon = '🔒'; break;
+      }
+
+      toast.innerHTML = `
+        <span class="toast-icon">${icon}</span>
+        <span class="toast-content">${message}</span>
+        <span class="toast-close">×</span>
+      `;
+
+      // Add to container
+      this.container.appendChild(toast);
+
+      // Add to tracking array
+      this.toasts.push(toast);
+
+      // If this is a new group, track it
+      if (groupKey) {
+        this.groupedNotifications[groupKey] = {
+          id: notificationId,
+          message: message,
+          type: type,
+          count: 1,
+          lastUpdate: new Date(),
+          toast: toast
+        };
+      }
+
+      // Add to history
+      const historyItem = {
+        id: notificationId,
+        message: message,
+        type: type,
+        timestamp: new Date(),
+        count: 1
+      };
+
+      this.history.unshift(historyItem);
+
+      // Limit history size
+      if (this.history.length > this.maxHistory) {
+        this.history = this.history.slice(0, this.maxHistory);
+      }
+
+      // Save history
+      this.saveHistory();
+
+      // Update unread count
+      this.updateUnreadCount(this.unreadCount + 1);
+
+      // Limit the number of toasts
+      if (this.toasts.length > this.maxToasts) {
+        const oldestToast = this.toasts.shift();
+        if (oldestToast && oldestToast.parentNode) {
+          oldestToast.classList.remove('show');
+          setTimeout(() => {
+            if (oldestToast.parentNode) {
+              oldestToast.parentNode.removeChild(oldestToast);
+            }
+          }, 300);
+        }
+      }
+
+      // Show the toast with a slight delay for animation
+      setTimeout(() => {
+        toast.classList.add('show');
+      }, 10);
+
+      // Add close button event listener
+      const closeBtn = toast.querySelector('.toast-close');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          this.dismiss(toast);
+        });
+      }
+
+      // Auto-dismiss after duration
+      if (duration > 0) {
+        toast.dismissTimer = setTimeout(() => {
+          this.dismiss(toast);
+        }, duration);
+      }
+
+      return toast;
+    },
+
+    // Dismiss a toast
+    dismiss(toast) {
+      if (!toast) return;
+
+      // Clear any dismiss timer
+      if (toast.dismissTimer) {
+        clearTimeout(toast.dismissTimer);
+        toast.dismissTimer = null;
+      }
+
+      // Remove from DOM with animation
       toast.classList.remove('show');
-    }, 3000);
+
+      // Remove from tracking array
+      const index = this.toasts.indexOf(toast);
+      if (index > -1) {
+        this.toasts.splice(index, 1);
+      }
+
+      // Remove from DOM after animation completes
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.parentNode.removeChild(toast);
+        }
+      }, 300);
+    }
+  };
+
+  // Initialize the notification system immediately
+  notificationManager.initializeOnLoad();
+
+  // Shorthand function for showing a toast
+  function showToast(message, type = 'info', duration = 3000) {
+    return notificationManager.show(message, type, duration);
   }
 
   // Render the loading state
@@ -369,6 +944,9 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
     }
 
+    // Initialize the notification system
+    buildDashboardDescription();
+
     // Render the entire dashboard
     rootElement.innerHTML = `
       <div class="dashboard">
@@ -383,6 +961,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <option value="${ns}" ${selectedNamespace === ns ? 'selected' : ''}>${ns}</option>
               `).join('')}
             </select>
+            <div id="notification-bell-container"></div>
             <div id="connection-status" class="connection-status">● Connecting...</div>
           </div>
         </header>
@@ -411,6 +990,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Update connection status based on WebSocket state
     updateConnectionStatus(wsConnection && wsConnection.readyState === WebSocket.OPEN);
+
+    // Add the notification bell to the header
+    notificationManager.addBellToHeader();
   }
 
   // Render a single application card

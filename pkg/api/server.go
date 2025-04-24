@@ -839,13 +839,18 @@ func (s *Server) sendInitialData(client *websocketClient) {
 		}
 	}
 
+	// Get the reason for this update
+	initialReason := "Initial data load"
+
 	// Create response with the checked applications
 	response := struct {
 		Applications []models.Application `json:"applications"`
 		LastUpdated  time.Time            `json:"lastUpdated"`
+		UpdateReason string               `json:"updateReason,omitempty"`
 	}{
 		Applications: apps,
 		LastUpdated:  lastUpdated,
+		UpdateReason: initialReason,
 	}
 
 	// Set write deadline and send data without holding the lock
@@ -895,13 +900,21 @@ func (s *Server) broadcastToClients() {
 		}
 	}
 
+	// Get the reason for this update if available
+	broadcastReason := s.informerCollector.GetLastUpdateReason()
+	if broadcastReason == "" {
+		broadcastReason = "Manual refresh"
+	}
+
 	// Create response with the checked applications
 	responseData := struct {
 		Applications []models.Application `json:"applications"`
 		LastUpdated  time.Time            `json:"lastUpdated"`
+		UpdateReason string               `json:"updateReason,omitempty"`
 	}{
 		Applications: apps,
 		LastUpdated:  lastUpdated,
+		UpdateReason: broadcastReason,
 	}
 
 	// Now get the list of clients under a lock
