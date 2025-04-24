@@ -4,6 +4,13 @@ All notable changes to the kpods-monitor project will be documented in this file
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.2.4] - 2025-04-24
+
+### Changed
+
+- Refactored code to eliminate duplication by reusing the pod matching algorithm across components
+- Simplified Kubernetes informers implementation to only use pod informers, reducing resource usage
+
 
 ## [0.2.3] - 2025-04-24
 

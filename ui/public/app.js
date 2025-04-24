@@ -238,7 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // Show a notification for other status changes
-                showToast(`Update: ${updateReason}`, notificationType, notificationDuration);
+                showToast(`${updateReason}`, notificationType, notificationDuration);
               }
             }
           }

@@ -11,6 +11,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
@@ -31,17 +32,11 @@ type InformerCollector struct {
 	// Map of namespace to informer factory
 	factories map[string]informers.SharedInformerFactory
 
-	// Maps of namespace to informers
-	podInformers       map[string]cache.SharedIndexInformer
-	deployInformers    map[string]cache.SharedIndexInformer
-	statefulInformers  map[string]cache.SharedIndexInformer
-	daemonsetInformers map[string]cache.SharedIndexInformer
+	// Maps of namespace to pod informers
+	podInformers map[string]cache.SharedIndexInformer
 
-	// Maps of namespace to stores
-	podStores       map[string]cache.Store
-	deployStores    map[string]cache.Store
-	statefulStores  map[string]cache.Store
-	daemonsetStores map[string]cache.Store
+	// Maps of namespace to pod stores
+	podStores map[string]cache.Store
 
 	// Metrics collector for efficient metrics collection
 	metricsCollector *MetricsCollector
@@ -79,26 +74,20 @@ func NewInformerCollector(collector *Collector) (*InformerCollector, error) {
 	metricsCollector := NewMetricsCollector(collector.metricsClient, collector.metricsEnabled, collector.config)
 
 	ic := &InformerCollector{
-		clientset:          collector.clientset,
-		config:             collector.config,
-		metricsClient:      collector.metricsClient,
-		metricsEnabled:     collector.metricsEnabled,
-		logger:             logger.DefaultLogger,
-		metricsCollector:   metricsCollector,
-		updateCh:           make(chan struct{}, 10), // Increased buffer size to handle more updates
-		debounceInterval:   500 * time.Millisecond,  // Debounce interval of 500ms
-		ctx:                ctx,
-		cancel:             cancel,
-		factories:          make(map[string]informers.SharedInformerFactory),
-		podInformers:       make(map[string]cache.SharedIndexInformer),
-		deployInformers:    make(map[string]cache.SharedIndexInformer),
-		statefulInformers:  make(map[string]cache.SharedIndexInformer),
-		daemonsetInformers: make(map[string]cache.SharedIndexInformer),
-		podStores:          make(map[string]cache.Store),
-		deployStores:       make(map[string]cache.Store),
-		statefulStores:     make(map[string]cache.Store),
-		daemonsetStores:    make(map[string]cache.Store),
-		watchedNamespaces:  make(map[string]bool),
+		clientset:         collector.clientset,
+		config:            collector.config,
+		metricsClient:     collector.metricsClient,
+		metricsEnabled:    collector.metricsEnabled,
+		logger:            logger.DefaultLogger,
+		metricsCollector:  metricsCollector,
+		updateCh:          make(chan struct{}, 10), // Increased buffer size to handle more updates
+		debounceInterval:  500 * time.Millisecond,  // Debounce interval of 500ms
+		ctx:               ctx,
+		cancel:            cancel,
+		factories:         make(map[string]informers.SharedInformerFactory),
+		podInformers:      make(map[string]cache.SharedIndexInformer),
+		podStores:         make(map[string]cache.Store),
+		watchedNamespaces: make(map[string]bool),
 	}
 
 	// Extract namespaces from the config
@@ -128,23 +117,17 @@ func NewInformerCollector(collector *Collector) (*InformerCollector, error) {
 
 		ic.factories[namespace] = factory
 
-		// Create informers for each resource type in this namespace
+		// Create only pod informers for each namespace - we only need to watch pods for UI updates
 		podInformer := factory.Core().V1().Pods().Informer()
-		deployInformer := factory.Apps().V1().Deployments().Informer()
-		statefulInformer := factory.Apps().V1().StatefulSets().Informer()
-		daemonsetInformer := factory.Apps().V1().DaemonSets().Informer()
 
-		// Store the informers
+		// Store the pod informer
 		ic.podInformers[namespace] = podInformer
-		ic.deployInformers[namespace] = deployInformer
-		ic.statefulInformers[namespace] = statefulInformer
-		ic.daemonsetInformers[namespace] = daemonsetInformer
 
-		// Get stores from informers
+		// Get store from pod informer
 		ic.podStores[namespace] = podInformer.GetStore()
-		ic.deployStores[namespace] = deployInformer.GetStore()
-		ic.statefulStores[namespace] = statefulInformer.GetStore()
-		ic.daemonsetStores[namespace] = daemonsetInformer.GetStore()
+
+		// For controller information, we'll use the Kubernetes API directly when needed
+		// This simplifies our implementation and reduces resource usage
 
 		// Add event handlers for pod informer
 		podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -197,74 +180,8 @@ func NewInformerCollector(collector *Collector) (*InformerCollector, error) {
 			},
 		})
 
-		// Add event handlers for deployment informer
-		deployInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				if deploy, ok := obj.(*appsv1.Deployment); ok {
-					ic.queueUpdate(fmt.Sprintf("Deployment added: %s/%s", deploy.Namespace, deploy.Name))
-				}
-			},
-			UpdateFunc: func(old, new interface{}) {
-				if deploy, ok := new.(*appsv1.Deployment); ok {
-					ic.queueUpdate(fmt.Sprintf("Deployment updated: %s/%s", deploy.Namespace, deploy.Name))
-				}
-			},
-			DeleteFunc: func(obj interface{}) {
-				if deploy, ok := obj.(*appsv1.Deployment); ok {
-					ic.queueUpdate(fmt.Sprintf("Deployment deleted: %s/%s", deploy.Namespace, deploy.Name))
-				} else if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
-					if deploy, ok := tombstone.Obj.(*appsv1.Deployment); ok {
-						ic.queueUpdate(fmt.Sprintf("Deployment deleted: %s/%s", deploy.Namespace, deploy.Name))
-					}
-				}
-			},
-		})
-
-		// Add event handlers for statefulset informer
-		statefulInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				if ss, ok := obj.(*appsv1.StatefulSet); ok {
-					ic.queueUpdate(fmt.Sprintf("StatefulSet added: %s/%s", ss.Namespace, ss.Name))
-				}
-			},
-			UpdateFunc: func(old, new interface{}) {
-				if ss, ok := new.(*appsv1.StatefulSet); ok {
-					ic.queueUpdate(fmt.Sprintf("StatefulSet updated: %s/%s", ss.Namespace, ss.Name))
-				}
-			},
-			DeleteFunc: func(obj interface{}) {
-				if ss, ok := obj.(*appsv1.StatefulSet); ok {
-					ic.queueUpdate(fmt.Sprintf("StatefulSet deleted: %s/%s", ss.Namespace, ss.Name))
-				} else if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
-					if ss, ok := tombstone.Obj.(*appsv1.StatefulSet); ok {
-						ic.queueUpdate(fmt.Sprintf("StatefulSet deleted: %s/%s", ss.Namespace, ss.Name))
-					}
-				}
-			},
-		})
-
-		// Add event handlers for daemonset informer
-		daemonsetInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				if ds, ok := obj.(*appsv1.DaemonSet); ok {
-					ic.queueUpdate(fmt.Sprintf("DaemonSet added: %s/%s", ds.Namespace, ds.Name))
-				}
-			},
-			UpdateFunc: func(old, new interface{}) {
-				if ds, ok := new.(*appsv1.DaemonSet); ok {
-					ic.queueUpdate(fmt.Sprintf("DaemonSet updated: %s/%s", ds.Namespace, ds.Name))
-				}
-			},
-			DeleteFunc: func(obj interface{}) {
-				if ds, ok := obj.(*appsv1.DaemonSet); ok {
-					ic.queueUpdate(fmt.Sprintf("DaemonSet deleted: %s/%s", ds.Namespace, ds.Name))
-				} else if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
-					if ds, ok := tombstone.Obj.(*appsv1.DaemonSet); ok {
-						ic.queueUpdate(fmt.Sprintf("DaemonSet deleted: %s/%s", ds.Namespace, ds.Name))
-					}
-				}
-			},
-		})
+		// We no longer need event handlers for controllers (Deployments, StatefulSets, DaemonSets)
+		// Pod events are sufficient for UI updates, and we'll get controller information when needed
 	}
 
 	return ic, nil
@@ -347,19 +264,12 @@ func (ic *InformerCollector) Start() error {
 			"namespace": namespace,
 		})
 
-		// Get all informers for this namespace
+		// Get pod informer for this namespace
 		podInformer := ic.podInformers[namespace]
-		deployInformer := ic.deployInformers[namespace]
-		statefulInformer := ic.statefulInformers[namespace]
-		daemonsetInformer := ic.daemonsetInformers[namespace]
 
-		// Wait for all caches to sync
-		if !cache.WaitForCacheSync(ic.ctx.Done(),
-			podInformer.HasSynced,
-			deployInformer.HasSynced,
-			statefulInformer.HasSynced,
-			daemonsetInformer.HasSynced) {
-			return fmt.Errorf("failed to sync informer caches for namespace %s", namespace)
+		// Wait for pod cache to sync
+		if !cache.WaitForCacheSync(ic.ctx.Done(), podInformer.HasSynced) {
+			return fmt.Errorf("failed to sync pod informer cache for namespace %s", namespace)
 		}
 	}
 
@@ -550,7 +460,7 @@ func (ic *InformerCollector) collectApplicationData(appConfig models.Application
 	return app, nil
 }
 
-// collectDeploymentPods collects pods for specified deployments
+// collectDeploymentPods collects pods for specified deployments using the Kubernetes API directly
 func (ic *InformerCollector) collectDeploymentPods(namespace string, deploymentNames []string) ([]models.Pod, error) {
 	var result []models.Pod
 
@@ -560,37 +470,30 @@ func (ic *InformerCollector) collectDeploymentPods(namespace string, deploymentN
 		deploymentSet[name] = true
 	}
 
-	// Find matching deployments from the cache
+	// Find matching deployments using the Kubernetes API
 	var matchedDeployments []*appsv1.Deployment
 	var missingDeployments []string
 	foundDeployments := make(map[string]bool)
 
-	// Check if we have a store for this namespace
-	deployStore, ok := ic.deployStores[namespace]
-	if !ok {
-		return nil, fmt.Errorf("no deployment store found for namespace %s", namespace)
-	}
-
-	// Get all deployments from the cache for this namespace
-	deployments := deployStore.List()
-	for _, obj := range deployments {
-		deployment, ok := obj.(*appsv1.Deployment)
-		if !ok {
-			continue // Skip if not a deployment
+	// Get deployments directly from the Kubernetes API
+	for deployName := range deploymentSet {
+		// Get the deployment from the API
+		deploy, err := ic.clientset.AppsV1().Deployments(namespace).Get(ic.ctx, deployName, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				missingDeployments = append(missingDeployments, deployName)
+				continue
+			}
+			ic.logger.Error("Failed to get deployment", err, map[string]interface{}{
+				"deployment": deployName,
+				"namespace":  namespace,
+			})
+			continue
 		}
 
-		// Check if this deployment matches our criteria
-		if deploymentSet[deployment.Name] {
-			matchedDeployments = append(matchedDeployments, deployment)
-			foundDeployments[deployment.Name] = true
-		}
-	}
-
-	// Find which deployments are missing
-	for name := range deploymentSet {
-		if !foundDeployments[name] {
-			missingDeployments = append(missingDeployments, name)
-		}
+		// Mark as found and add to matched deployments
+		foundDeployments[deployName] = true
+		matchedDeployments = append(matchedDeployments, deploy)
 	}
 
 	// Check if we have a pod store for this namespace
@@ -673,7 +576,7 @@ func (ic *InformerCollector) collectDeploymentPods(namespace string, deploymentN
 	return result, nil
 }
 
-// collectStatefulSetPods collects pods for specified statefulsets
+// collectStatefulSetPods collects pods for specified statefulsets using the Kubernetes API directly
 func (ic *InformerCollector) collectStatefulSetPods(namespace string, statefulSetNames []string) ([]models.Pod, error) {
 	var result []models.Pod
 
@@ -683,37 +586,30 @@ func (ic *InformerCollector) collectStatefulSetPods(namespace string, statefulSe
 		statefulSetSet[name] = true
 	}
 
-	// Find matching statefulsets from the cache
+	// Find matching statefulsets using the Kubernetes API
 	var matchedStatefulSets []*appsv1.StatefulSet
 	var missingStatefulSets []string
 	foundStatefulSets := make(map[string]bool)
 
-	// Check if we have a store for this namespace
-	statefulStore, ok := ic.statefulStores[namespace]
-	if !ok {
-		return nil, fmt.Errorf("no statefulset store found for namespace %s", namespace)
-	}
-
-	// Get all statefulsets from the cache for this namespace
-	statefulSets := statefulStore.List()
-	for _, obj := range statefulSets {
-		statefulSet, ok := obj.(*appsv1.StatefulSet)
-		if !ok {
-			continue // Skip if not a statefulset
+	// Get statefulsets directly from the Kubernetes API
+	for ssName := range statefulSetSet {
+		// Get the statefulset from the API
+		ss, err := ic.clientset.AppsV1().StatefulSets(namespace).Get(ic.ctx, ssName, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				missingStatefulSets = append(missingStatefulSets, ssName)
+				continue
+			}
+			ic.logger.Error("Failed to get statefulset", err, map[string]interface{}{
+				"statefulset": ssName,
+				"namespace":   namespace,
+			})
+			continue
 		}
 
-		// Check if this statefulset matches our criteria
-		if statefulSetSet[statefulSet.Name] {
-			matchedStatefulSets = append(matchedStatefulSets, statefulSet)
-			foundStatefulSets[statefulSet.Name] = true
-		}
-	}
-
-	// Find which statefulsets are missing
-	for name := range statefulSetSet {
-		if !foundStatefulSets[name] {
-			missingStatefulSets = append(missingStatefulSets, name)
-		}
+		// Mark as found and add to matched statefulsets
+		foundStatefulSets[ssName] = true
+		matchedStatefulSets = append(matchedStatefulSets, ss)
 	}
 
 	// Check if we have a pod store for this namespace
@@ -796,7 +692,7 @@ func (ic *InformerCollector) collectStatefulSetPods(namespace string, statefulSe
 	return result, nil
 }
 
-// collectDaemonSetPods collects pods for specified daemonsets
+// collectDaemonSetPods collects pods for specified daemonsets using the Kubernetes API directly
 func (ic *InformerCollector) collectDaemonSetPods(namespace string, daemonSetNames []string) ([]models.Pod, error) {
 	var result []models.Pod
 
@@ -806,37 +702,30 @@ func (ic *InformerCollector) collectDaemonSetPods(namespace string, daemonSetNam
 		daemonSetSet[name] = true
 	}
 
-	// Find matching daemonsets from the cache
+	// Find matching daemonsets using the Kubernetes API
 	var matchedDaemonSets []*appsv1.DaemonSet
 	var missingDaemonSets []string
 	foundDaemonSets := make(map[string]bool)
 
-	// Check if we have a store for this namespace
-	daemonsetStore, ok := ic.daemonsetStores[namespace]
-	if !ok {
-		return nil, fmt.Errorf("no daemonset store found for namespace %s", namespace)
-	}
-
-	// Get all daemonsets from the cache for this namespace
-	daemonSets := daemonsetStore.List()
-	for _, obj := range daemonSets {
-		daemonSet, ok := obj.(*appsv1.DaemonSet)
-		if !ok {
-			continue // Skip if not a daemonset
+	// Get daemonsets directly from the Kubernetes API
+	for dsName := range daemonSetSet {
+		// Get the daemonset from the API
+		ds, err := ic.clientset.AppsV1().DaemonSets(namespace).Get(ic.ctx, dsName, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				missingDaemonSets = append(missingDaemonSets, dsName)
+				continue
+			}
+			ic.logger.Error("Failed to get daemonset", err, map[string]interface{}{
+				"daemonset": dsName,
+				"namespace": namespace,
+			})
+			continue
 		}
 
-		// Check if this daemonset matches our criteria
-		if daemonSetSet[daemonSet.Name] {
-			matchedDaemonSets = append(matchedDaemonSets, daemonSet)
-			foundDaemonSets[daemonSet.Name] = true
-		}
-	}
-
-	// Find which daemonsets are missing
-	for name := range daemonSetSet {
-		if !foundDaemonSets[name] {
-			missingDaemonSets = append(missingDaemonSets, name)
-		}
+		// Mark as found and add to matched daemonsets
+		foundDaemonSets[dsName] = true
+		matchedDaemonSets = append(matchedDaemonSets, ds)
 	}
 
 	// Check if we have a pod store for this namespace
