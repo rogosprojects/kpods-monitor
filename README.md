@@ -383,12 +383,18 @@ The dashboard sets appropriate security headers on all responses:
 
 The dashboard uses Kubernetes Informers/Watch pattern instead of polling for improved efficiency:
 
-- Establishes a single connection to the Kubernetes API server
+- Establishes namespace-scoped connections to the Kubernetes API server
+- Only watches namespaces specified in your configuration
+- Only collects metrics for namespaces specified in your configuration
+- Only processes metrics for pods belonging to workloads specified in your configuration
+- Uses intelligent pod name matching to identify which workload a pod belongs to
 - Receives real-time updates when resources change
 - Significantly reduces API server load compared to polling
 - Provides immediate notification of pod status changes
 - Uses WebSockets to push updates to clients in real-time
 - Includes detailed debug logging showing the reason for client updates (when debug mode is enabled)
+- Optimizes resource usage by only watching namespaces you care about
+- Shows which specific pod triggered metrics updates in the logs
 
 Read more about Informers here: [Demystifying Kubernetes Informers
 ](https://medium.com/@jeevanragula/demystifying-kubernetes-informer-streamlining-event-driven-workflows-955285166993)

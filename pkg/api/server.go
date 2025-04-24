@@ -147,8 +147,9 @@ type Server struct {
 type websocketClient struct {
 	conn        *websocket.Conn
 	server      *Server
-	ipAddress   string    // Client IP address
-	connectTime time.Time // When the client connected
+	ipAddress   string     // Client IP address
+	connectTime time.Time  // When the client connected
+	writeMutex  sync.Mutex // Mutex to protect concurrent writes to the WebSocket
 }
 
 // NewServer creates a new API server with collector
@@ -630,8 +631,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		// Handle WebSocket protocol-level ping
 		if messageType == websocket.PingMessage {
+			// Use the mutex to protect the WebSocket write
+			client.writeMutex.Lock()
 			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := conn.WriteMessage(websocket.PongMessage, nil); err != nil {
+			err := conn.WriteMessage(websocket.PongMessage, nil)
+			client.writeMutex.Unlock()
+
+			if err != nil {
 				break
 			}
 			continue
@@ -650,13 +656,18 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				})
 
 				// Send pong response
+				// Use the mutex to protect the WebSocket write
+				client.writeMutex.Lock()
 				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				pongMsg := struct {
 					Type string `json:"type"`
 				}{
 					Type: "pong",
 				}
-				if err := conn.WriteJSON(pongMsg); err != nil {
+				err := conn.WriteJSON(pongMsg)
+				client.writeMutex.Unlock()
+
+				if err != nil {
 					s.logger.Error("Error sending pong response", err, map[string]interface{}{
 						"client_ip": client.ipAddress,
 					})
@@ -838,8 +849,12 @@ func (s *Server) sendInitialData(client *websocketClient) {
 	}
 
 	// Set write deadline and send data without holding the lock
+	// Use the mutex to protect the WebSocket write
+	client.writeMutex.Lock()
 	client.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	err := client.conn.WriteJSON(response)
+	client.writeMutex.Unlock()
+
 	if err != nil {
 		s.logger.Error("Error sending initial data to client", err, map[string]interface{}{
 			"client_ip":    client.ipAddress,
@@ -907,9 +922,16 @@ func (s *Server) broadcastToClients() {
 	var failedClients []*websocketClient
 
 	for _, client := range clientsCopy {
+		// Use the mutex to protect the WebSocket write
+		client.writeMutex.Lock()
+
 		// Set write deadline before sending
 		client.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		err := client.conn.WriteJSON(responseData)
+
+		// Release the mutex
+		client.writeMutex.Unlock()
+
 		if err != nil {
 			s.logger.Error("Error broadcasting to client", err, map[string]interface{}{
 				"client_ip":    client.ipAddress,

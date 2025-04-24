@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Added detailed debug logging to show the reason for client updates (e.g., server events)
+- Added resource optimization to skip data processing when no clients are connected
+- Enhanced update notifications to include specific pod/resource names that triggered the update
+- Added more detailed logging for metrics updates to show which pod had significant changes
+
+### Changed
+- Optimized Kubernetes Informers to only watch namespaces specified in the config
+- Optimized Metrics collection to only fetch metrics for namespaces specified in the config
+- Further optimized Metrics collection to only process pods belonging to workloads specified in the config
+- Reduced API server load by using namespace-scoped informers instead of cluster-wide informers
+- Improved memory usage by only caching resources from namespaces that are being monitored
+- Reduced metrics API server load by making separate API calls for each namespace
+- Added intelligent pod name matching to identify which workload a pod belongs to
+- Improved pod name matching algorithm to correctly handle deployments with multiple dashes in their names
+- Enhanced StatefulSet pod matching to use a more robust algorithm
+
+### Fixed
+- Fixed concurrent write issues with WebSocket connections by adding mutex protection
+- Fixed potential race conditions in pod name matching for deployments with multiple dashes in their names
 
 ## [0.2.1] - 2025-04-23
 

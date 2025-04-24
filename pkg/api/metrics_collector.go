@@ -6,10 +6,12 @@ import (
 	"kpods-monitor/pkg/logger"
 	"kpods-monitor/pkg/models"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsv "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
@@ -19,6 +21,7 @@ type MetricsCollector struct {
 	metricsClient  *metricsv.Clientset
 	metricsEnabled bool
 	logger         *logger.Logger
+	config         *models.Config // Reference to the application config
 
 	// Cache of pod metrics
 	metricsCache      map[string]*PodMetrics
@@ -37,6 +40,15 @@ type MetricsCollector struct {
 	numSamples        int     // Number of samples to keep for trend calculation
 	cpuThreshold      float64 // Threshold for CPU trend calculation
 	memoryThreshold   float64 // Threshold for memory trend calculation
+
+	// Last update reason for debugging
+	lastUpdateReason string
+	updateReasonLock sync.RWMutex
+
+	// Track which namespaces and workloads we care about
+	watchedNamespaces map[string]bool
+	watchedWorkloads  map[string]map[string]bool   // Map of namespace to map of workload name to bool
+	workloadKinds     map[string]map[string]string // Map of namespace to map of workload name to kind (Deployment, StatefulSet, DaemonSet)
 }
 
 // PodMetrics stores metrics data for a single pod
@@ -56,11 +68,12 @@ type PodMetrics struct {
 }
 
 // NewMetricsCollector creates a new metrics collector
-func NewMetricsCollector(metricsClient *metricsv.Clientset, metricsEnabled bool) *MetricsCollector {
-	return &MetricsCollector{
+func NewMetricsCollector(metricsClient *metricsv.Clientset, metricsEnabled bool, config *models.Config) *MetricsCollector {
+	mc := &MetricsCollector{
 		metricsClient:     metricsClient,
 		metricsEnabled:    metricsEnabled,
 		logger:            logger.DefaultLogger,
+		config:            config,
 		metricsCache:      make(map[string]*PodMetrics),
 		updateCh:          make(chan struct{}, 1), // Buffered channel to prevent blocking
 		stopCh:            make(chan struct{}),
@@ -70,7 +83,58 @@ func NewMetricsCollector(metricsClient *metricsv.Clientset, metricsEnabled bool)
 		numSamples:        3,                // Keep 3 samples for trend calculation
 		cpuThreshold:      0.30,             // 30% threshold for CPU trend
 		memoryThreshold:   0.10,             // 10% threshold for memory trend
+		watchedNamespaces: make(map[string]bool),
+		watchedWorkloads:  make(map[string]map[string]bool),
+		workloadKinds:     make(map[string]map[string]string),
 	}
+
+	// Extract namespaces and workloads from the config
+	if config != nil {
+		for _, appConfig := range config.Applications {
+			for namespace, selector := range appConfig.Selector {
+				// Track the namespace
+				mc.watchedNamespaces[namespace] = true
+
+				// Initialize maps for this namespace if needed
+				if _, exists := mc.watchedWorkloads[namespace]; !exists {
+					mc.watchedWorkloads[namespace] = make(map[string]bool)
+					mc.workloadKinds[namespace] = make(map[string]string)
+				}
+
+				// Track deployments
+				for _, name := range selector.Deployments {
+					mc.watchedWorkloads[namespace][name] = true
+					mc.workloadKinds[namespace][name] = "Deployment"
+				}
+
+				// Track statefulsets
+				for _, name := range selector.StatefulSets {
+					mc.watchedWorkloads[namespace][name] = true
+					mc.workloadKinds[namespace][name] = "StatefulSet"
+				}
+
+				// Track daemonsets
+				for _, name := range selector.DaemonSets {
+					mc.watchedWorkloads[namespace][name] = true
+					mc.workloadKinds[namespace][name] = "DaemonSet"
+				}
+			}
+		}
+
+		// Log the namespaces and workload counts we're watching
+		var namespaces []string
+		var totalWorkloads int
+		for namespace, workloads := range mc.watchedWorkloads {
+			namespaces = append(namespaces, namespace)
+			totalWorkloads += len(workloads)
+		}
+		mc.logger.Info("Setting up metrics collection", map[string]interface{}{
+			"namespaces":      namespaces,
+			"total_workloads": totalWorkloads,
+		})
+	}
+
+	return mc
 }
 
 // Start begins the metrics collection loop
@@ -106,6 +170,111 @@ func (mc *MetricsCollector) GetUpdateChannel() <-chan struct{} {
 	return mc.updateCh
 }
 
+// GetLastUpdateReason returns the reason for the last metrics update
+func (mc *MetricsCollector) GetLastUpdateReason() string {
+	mc.updateReasonLock.RLock()
+	defer mc.updateReasonLock.RUnlock()
+	return mc.lastUpdateReason
+}
+
+// isPodWatched checks if a pod belongs to a watched workload
+func (mc *MetricsCollector) isPodWatched(podMetrics *metricsv1beta1.PodMetrics) bool {
+	namespace := podMetrics.Namespace
+
+	// Check if we're watching this namespace
+	if !mc.watchedNamespaces[namespace] {
+		return false
+	}
+
+	// If we don't have any specific workloads for this namespace, watch all pods in the namespace
+	if len(mc.watchedWorkloads[namespace]) == 0 {
+		return true
+	}
+
+	// Extract owner references from the pod name
+	// This is a heuristic approach since we don't have the full pod object
+	// For StatefulSets, the pod name format is <statefulset-name>-<ordinal>
+	// For Deployments/ReplicaSets, the pod name format is <deployment-name>-<hash>-<random>
+
+	podName := podMetrics.Name
+
+	// First, check for exact match (unlikely but possible)
+	if mc.watchedWorkloads[namespace][podName] {
+		return true
+	}
+
+	// Check for StatefulSet pattern (name-ordinal)
+	// The pattern is: <statefulset-name>-<ordinal>
+	// For StatefulSets, we need to be careful with names that contain dashes
+
+	// First, find the last dash in the pod name
+	lastDashIndex := strings.LastIndex(podName, "-")
+	if lastDashIndex != -1 && lastDashIndex < len(podName)-1 {
+		// Check if everything after the last dash is a number (StatefulSet ordinal)
+		ordinalPart := podName[lastDashIndex+1:]
+		isOrdinal := true
+		for _, c := range ordinalPart {
+			if c < '0' || c > '9' {
+				isOrdinal = false
+				break
+			}
+		}
+
+		if isOrdinal {
+			// This looks like a StatefulSet pod
+			possibleOwner := podName[:lastDashIndex]
+			if mc.watchedWorkloads[namespace][possibleOwner] {
+				mc.logger.Debug("Pod matched to StatefulSet", map[string]interface{}{
+					"pod_name":    podName,
+					"statefulset": possibleOwner,
+					"ordinal":     ordinalPart,
+				})
+				return true
+			}
+		}
+	}
+
+	// Check for Deployment/ReplicaSet pattern
+	// The pattern is: <deployment-name>-<replicaset-hash>-<random-string>
+	for workloadName := range mc.watchedWorkloads[namespace] {
+		// First, check if the pod name starts with the workload name followed by a dash
+		if !strings.HasPrefix(podName, workloadName+"-") {
+			continue
+		}
+
+		// Now, check if what follows is a valid ReplicaSet pattern
+		remainder := podName[len(workloadName)+1:]
+
+		// Look for another dash that would separate the hash from the random string
+		dashIndex := strings.Index(remainder, "-")
+		if dashIndex == -1 {
+			// No second dash found, this might be a direct controller (unlikely)
+			// Log this case for debugging
+			mc.logger.Debug("Pod name matches workload prefix but doesn't follow ReplicaSet pattern", map[string]interface{}{
+				"pod_name":      podName,
+				"workload_name": workloadName,
+				"remainder":     remainder,
+			})
+			continue
+		}
+
+		// Check if the hash part is the right length (typically 8-10 characters)
+		hashPart := remainder[:dashIndex]
+		if len(hashPart) >= 8 && len(hashPart) <= 10 {
+			// This looks like a valid ReplicaSet hash pattern
+			mc.logger.Debug("Pod matched to workload using improved algorithm", map[string]interface{}{
+				"pod_name":      podName,
+				"workload_name": workloadName,
+				"hash_part":     hashPart,
+			})
+			return true
+		}
+	}
+
+	// No match found
+	return false
+}
+
 // SetCollectInterval sets the interval between metrics collections
 func (mc *MetricsCollector) SetCollectInterval(interval time.Duration) {
 	if interval < 15*time.Second {
@@ -137,23 +306,47 @@ func (mc *MetricsCollector) collectLoop() {
 	}
 }
 
-// collectAllMetrics fetches metrics for all pods in a single batch
+// collectAllMetrics fetches metrics for pods in the watched namespaces
 func (mc *MetricsCollector) collectAllMetrics() {
 	if !mc.metricsEnabled || mc.metricsClient == nil {
 		return
 	}
 
-	mc.logger.Debug("Collecting metrics for all pods", nil)
+	// If no namespaces are configured, don't collect any metrics
+	if len(mc.watchedNamespaces) == 0 {
+		mc.logger.Debug("No namespaces configured for metrics collection", nil)
+		return
+	}
+
+	mc.logger.Debug("Collecting metrics for pods in watched namespaces", map[string]interface{}{
+		"namespace_count": len(mc.watchedNamespaces),
+	})
 
 	// Use a timeout context to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Get metrics for all pods across all namespaces
-	podMetricsList, err := mc.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		mc.logger.Error("Failed to collect pod metrics", err, nil)
-		return
+	// Create a list to hold all pod metrics
+	var allPodMetrics []metav1.Object
+
+	// Get metrics for each namespace separately
+	for namespace := range mc.watchedNamespaces {
+		mc.logger.Debug("Collecting metrics for namespace", map[string]interface{}{
+			"namespace": namespace,
+		})
+
+		podMetricsList, err := mc.metricsClient.MetricsV1beta1().PodMetricses(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			mc.logger.Error("Failed to collect pod metrics for namespace", err, map[string]interface{}{
+				"namespace": namespace,
+			})
+			continue
+		}
+
+		// Add the pod metrics to our list
+		for i := range podMetricsList.Items {
+			allPodMetrics = append(allPodMetrics, &podMetricsList.Items[i])
+		}
 	}
 
 	// Track significant changes to determine if we need to notify listeners
@@ -166,12 +359,27 @@ func (mc *MetricsCollector) collectAllMetrics() {
 	defer mc.metricsCacheMutex.Unlock()
 
 	// Process each pod's metrics
-	for _, podMetrics := range podMetricsList.Items {
+	for _, obj := range allPodMetrics {
+		// Get the pod metrics
+		podMetricsObj, ok := obj.(*metricsv1beta1.PodMetrics)
+		if !ok {
+			mc.logger.Debug("Failed to convert object to PodMetrics", nil)
+			continue
+		}
+
+		// Skip pods that don't belong to watched workloads
+		if !mc.isPodWatched(podMetricsObj) {
+			mc.logger.Debug("Skipping pod metrics - not part of watched workloads", map[string]interface{}{
+				"pod": fmt.Sprintf("%s/%s", podMetricsObj.Namespace, podMetricsObj.Name),
+			})
+			continue
+		}
+
 		// Calculate total CPU and memory usage across all containers
 		var cpuUsage int64
 		var memoryUsage int64
 
-		for _, container := range podMetrics.Containers {
+		for _, container := range podMetricsObj.Containers {
 			// CPU is in "n" format, typically in nanocores (n)
 			cpu := container.Usage.Cpu().MilliValue()
 			cpuUsage += cpu
@@ -182,7 +390,7 @@ func (mc *MetricsCollector) collectAllMetrics() {
 		}
 
 		// Create a unique key for this pod
-		podKey := fmt.Sprintf("%s/%s", podMetrics.Namespace, podMetrics.Name)
+		podKey := fmt.Sprintf("%s/%s", podMetricsObj.Namespace, podMetricsObj.Name)
 
 		// Check if we already have metrics for this pod
 		existingMetrics, exists := mc.metricsCache[podKey]
@@ -250,8 +458,12 @@ func (mc *MetricsCollector) collectAllMetrics() {
 
 	// Clean up old entries (pods that no longer exist)
 	currentPods := make(map[string]bool)
-	for _, podMetrics := range podMetricsList.Items {
-		podKey := fmt.Sprintf("%s/%s", podMetrics.Namespace, podMetrics.Name)
+	for _, obj := range allPodMetrics {
+		podMetricsObj, ok := obj.(*metricsv1beta1.PodMetrics)
+		if !ok {
+			continue
+		}
+		podKey := fmt.Sprintf("%s/%s", podMetricsObj.Namespace, podMetricsObj.Name)
 		currentPods[podKey] = true
 	}
 
@@ -273,9 +485,48 @@ func (mc *MetricsCollector) collectAllMetrics() {
 
 	// Notify listeners if there were significant changes
 	if significantChanges {
+		// Find which pod had the most significant change
+		var significantPod string
+		var maxChange float64
+
+		for podKey, metrics := range mc.metricsCache {
+			if len(metrics.CPUHistory) > 1 {
+				lastCPU := metrics.CPUHistory[len(metrics.CPUHistory)-2]
+				currentCPU := metrics.CPUHistory[len(metrics.CPUHistory)-1]
+
+				lastMemory := metrics.MemoryHistory[len(metrics.MemoryHistory)-2]
+				currentMemory := metrics.MemoryHistory[len(metrics.MemoryHistory)-1]
+
+				// Calculate percentage changes
+				cpuChange := math.Abs(currentCPU-lastCPU) / math.Max(lastCPU, 1.0)
+				memoryChange := math.Abs(currentMemory-lastMemory) / math.Max(lastMemory, 1.0)
+
+				// Use the larger of the two changes
+				change := math.Max(cpuChange, memoryChange)
+
+				if change > maxChange {
+					maxChange = change
+					significantPod = podKey
+				}
+			}
+		}
+
+		// If we found a significant pod, include it in the update reason
+		updateReason := "Metrics update"
+		if significantPod != "" {
+			updateReason = fmt.Sprintf("Metrics update for pod: %s", significantPod)
+		}
+
+		// Set the update reason
+		mc.lastUpdateReason = updateReason
+
 		select {
 		case mc.updateCh <- struct{}{}:
-			mc.logger.Debug("Notified listeners of significant metrics changes", nil)
+			mc.logger.Debug("Notified listeners of significant metrics changes", map[string]interface{}{
+				"reason": updateReason,
+				"pod":    significantPod,
+				"change": fmt.Sprintf("%.2f%%", maxChange*100),
+			})
 		default:
 			// Channel already has an update queued, no need to send another
 		}
