@@ -913,6 +913,20 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
   }
 
+  // Store collapsed state of application cards
+  let collapsedCards = {};
+
+  // Load collapsed state from localStorage if available
+  try {
+    const savedState = localStorage.getItem('collapsed_cards');
+    if (savedState) {
+      collapsedCards = JSON.parse(savedState);
+    }
+  } catch (e) {
+    console.error('Failed to load collapsed card states:', e);
+    collapsedCards = {};
+  }
+
   // Build the complete dashboard (used only on first load or major changes)
   function buildFullDashboard() {
     // If loading, show loading state
@@ -985,6 +999,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add event listeners
     document.getElementById('namespace-selector').addEventListener('change', handleNamespaceChange);
 
+    // Add click event listeners to application headers for collapsing/expanding
+    setupApplicationCardListeners();
+
     // Mark dashboard as initialized
     dashboardInitialized = true;
 
@@ -993,6 +1010,64 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Add the notification bell to the header
     notificationManager.addBellToHeader();
+  }
+
+  // Save collapsed state to localStorage
+  function saveCollapsedState() {
+    try {
+      localStorage.setItem('collapsed_cards', JSON.stringify(collapsedCards));
+    } catch (e) {
+      console.error('Failed to save collapsed card states:', e);
+    }
+  }
+
+  // Set up event listeners for application cards
+  function setupApplicationCardListeners() {
+    document.querySelectorAll('.application-header').forEach(header => {
+      header.addEventListener('click', function() {
+        const card = this.closest('.application-card');
+        const appId = card.id;
+
+        // Toggle collapsed state
+        if (card.classList.contains('collapsed')) {
+          card.classList.remove('collapsed');
+          collapsedCards[appId] = false;
+        } else {
+          card.classList.add('collapsed');
+          collapsedCards[appId] = true;
+        }
+
+        // Save collapsed state to localStorage
+        saveCollapsedState();
+      });
+    });
+
+    // Apply saved collapsed states or set default state (collapsed for healthy apps)
+    document.querySelectorAll('.application-card').forEach(card => {
+      const appId = card.id;
+      const healthIndicator = card.querySelector('.health-indicator');
+      const isHealthy = healthIndicator && healthIndicator.textContent.trim() === 'Healthy';
+
+      // If we have a saved state, use that
+      if (appId in collapsedCards) {
+        if (collapsedCards[appId]) {
+          card.classList.add('collapsed');
+        } else {
+          card.classList.remove('collapsed');
+        }
+      } else {
+        // No saved state, apply default: collapse if healthy
+        if (isHealthy) {
+          card.classList.add('collapsed');
+          collapsedCards[appId] = true;
+        } else {
+          collapsedCards[appId] = false;
+        }
+      }
+    });
+
+    // Save the initial state
+    saveCollapsedState();
   }
 
   // Render a single application card
@@ -1206,6 +1281,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     applicationsArea.innerHTML = appsHtml;
+
+    // Re-apply event listeners and collapsed states
+    setupApplicationCardListeners();
   }
 
   // Update only the last updated time display
@@ -1266,6 +1344,44 @@ document.addEventListener('DOMContentLoaded', () => {
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = newCardHtml.trim();
         container.appendChild(tempDiv.firstChild);
+
+        // Add event listener to the new card's header
+        const newCard = container.lastChild;
+        const header = newCard.querySelector('.application-header');
+        if (header) {
+          header.addEventListener('click', function() {
+            const card = this.closest('.application-card');
+            const cardId = card.id;
+
+            // Toggle collapsed state
+            if (card.classList.contains('collapsed')) {
+              card.classList.remove('collapsed');
+              collapsedCards[cardId] = false;
+            } else {
+              card.classList.add('collapsed');
+              collapsedCards[cardId] = true;
+            }
+
+            // Save collapsed state to localStorage
+            saveCollapsedState();
+          });
+
+          // Set initial state for new cards (collapsed if healthy)
+          const healthIndicator = newCard.querySelector('.health-indicator');
+          const isHealthy = healthIndicator && healthIndicator.textContent.trim() === 'Healthy';
+
+          // If we don't have a saved state, apply default
+          if (!(newCard.id in collapsedCards)) {
+            if (isHealthy) {
+              newCard.classList.add('collapsed');
+              collapsedCards[newCard.id] = true;
+            } else {
+              collapsedCards[newCard.id] = false;
+            }
+            // Save the updated state
+            saveCollapsedState();
+          }
+        }
       }
     });
 
@@ -1288,6 +1404,13 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
       }
     }
+
+    // 4. Apply saved collapsed states to any new cards
+    document.querySelectorAll('.application-card').forEach(card => {
+      if (collapsedCards[card.id]) {
+        card.classList.add('collapsed');
+      }
+    });
   }
 
   // Update a specific application card with new data

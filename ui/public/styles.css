@@ -68,9 +68,10 @@ body {
 
 /* Application Card Styles */
 .applications-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 20px;
+  align-items: flex-start;
 }
 
 .application-card {
@@ -79,12 +80,23 @@ body {
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
   overflow: hidden;
   border: 1px solid #e2e8f0;
-  transition: all 0.3s ease;
+  transition: all 0.3s ease, margin 0.3s ease, width 0.3s ease;
+  margin-bottom: 10px;
+  flex: 1 0 calc(50% - 20px); /* 50% width minus gap */
+  min-width: 300px;
+  max-width: 100%;
 }
 
 .application-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+}
+
+.application-card.collapsed {
+  margin-bottom: 10px;
+  flex: 0 0 auto; /* Allow collapsed cards to shrink */
+  min-width: 300px; /* Minimum width for collapsed cards */
+  width: calc(33.333% - 20px); /* Try to fit 3 collapsed cards per row */
 }
 
 .application-header {
@@ -95,7 +107,7 @@ body {
   align-items: center;
   cursor: pointer;
   position: relative;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.2s ease, border-radius 0.3s ease;
   flex-wrap: wrap;
 }
 
@@ -103,8 +115,67 @@ body {
   background-color: #edf2f7;
 }
 
+.application-card.collapsed {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.application-card.collapsed .application-header {
+  border-bottom: none;
+  border-radius: 8px;
+  background-color: #f1f5f9;
+}
+
+.application-card.collapsed .application-header:hover {
+  background-color: #e2e8f0;
+}
+
+.application-card.collapsed .namespace-tags-container {
+  flex: 1;
+  justify-content: flex-end;
+  max-width: 50%;
+  overflow: hidden;
+}
+
+.application-card.collapsed .namespace-tag {
+  max-width: 100px;
+  font-size: 11px;
+  padding: 3px 6px;
+  height: 16px;
+}
+
+.application-card.collapsed .pod-status-badge,
+.application-card.collapsed .health-indicator {
+  margin-bottom: 0;
+}
+
+.application-header h2::before {
+  content: "▼";
+  font-size: 12px;
+  color: #718096;
+  margin-right: 8px;
+  display: inline-block;
+  transition: transform 0.3s ease;
+  position: relative;
+  top: -1px;
+}
+
+.application-card.collapsed .application-header h2::before {
+  transform: rotate(-90deg);
+}
+
 .app-content {
   overflow: hidden;
+  max-height: 2000px; /* Large enough to contain any content */
+  transition: max-height 0.4s ease-in-out, opacity 0.3s ease-in-out, margin 0.3s ease-in-out;
+  opacity: 1;
+  margin-top: 0;
+}
+
+.application-card.collapsed .app-content {
+  max-height: 0;
+  opacity: 0;
+  margin-top: -5px;
+  border-bottom: none;
 }
 
 
@@ -116,6 +187,7 @@ body {
   flex-grow: 1;
   display: flex;
   align-items: center;
+  position: relative;
 }
 
 .app-stats {
@@ -151,6 +223,7 @@ body {
   gap: 6px;
   margin-right: 12px;
   align-items: center;
+  overflow: hidden;
 }
 
 .namespace-tag {
@@ -161,6 +234,10 @@ body {
   display: inline-flex;
   align-items: center;
   height: 18px;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pod-status-badge {
@@ -713,8 +790,24 @@ body {
 
 /* Medium-sized devices (tablets, small laptops) */
 @media (max-width: 768px) {
-  .applications-container {
-    grid-template-columns: 1fr;
+  .application-card {
+    flex: 1 0 100%; /* Full width on smaller screens */
+    min-width: 100%;
+  }
+
+  .application-card.collapsed {
+    flex: 0 0 auto;
+    min-width: 250px;
+    width: calc(50% - 20px); /* Try to fit 2 collapsed cards per row on tablets */
+  }
+
+  .application-card.collapsed .namespace-tags-container {
+    max-width: 45%;
+  }
+
+  .application-card.collapsed .namespace-tag {
+    max-width: 90px;
+    font-size: 11px;
   }
 
   .pods-table th, .pods-table td {
@@ -733,6 +826,10 @@ body {
 
   .application-header h2 {
     font-size: 17px;
+  }
+
+  .application-card.collapsed {
+    margin-bottom: 8px;
   }
 }
 
@@ -767,13 +864,45 @@ body {
   }
 
   .applications-container {
-    grid-template-columns: 1fr;
     gap: 16px;
+  }
+
+  .application-card {
+    flex: 1 0 100%;
+    min-width: 100%;
   }
 
   .application-header {
     flex-wrap: wrap;
     padding: 12px;
+  }
+
+  .application-card.collapsed {
+    margin-bottom: 6px;
+    flex: 0 0 auto;
+    min-width: 100%;
+    width: 100%;
+  }
+
+  .application-card.collapsed .application-header {
+    padding: 10px 12px;
+  }
+
+  .application-card.collapsed .application-header h2 {
+    margin-bottom: 0;
+    width: auto;
+    margin-right: 8px;
+  }
+
+  .application-card.collapsed .namespace-tags-container {
+    max-width: 40%;
+  }
+
+  .application-card.collapsed .namespace-tag {
+    max-width: 80px;
+    font-size: 10px;
+    padding: 2px 5px;
+    height: 14px;
   }
 
   .application-header h2 {
