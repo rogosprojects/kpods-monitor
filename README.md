@@ -33,19 +33,19 @@ The system excels at detecting configuration discrepancies by highlighting missi
 ### Running locally
 
 1. Clone the repository
-   ```
+   ```bash
    git clone https://github.com/rogosprojects/kpods-monitor.git
    cd kpods-monitor
    ```
 
 2. Create a configuration file (see `config.yaml` for example)
-   ```
+   ```bash
    cp example-config.yaml config.yaml
    # Edit config.yaml with your preferred editor
    ```
 
 3. Run the server:
-   ```
+   ```bash
    go run cmd/server/main.go --config=config.yaml
    ```
 
@@ -54,26 +54,40 @@ The system excels at detecting configuration discrepancies by highlighting missi
 ### Building from source
 
 Build the application:
-```
+```bash
 ./build.sh
 ```
 
 Run the built binary:
-```
+```bash
 ./kpods-monitor -config config.yaml
 ```
 
 ### Running with Docker
 
 Build the Docker image:
-```
+```bash
 docker build -t kpods-monitor .
 ```
 
 Run the container:
-```
+```bash
 docker run -p 8080:8080 -v ~/.kube/config:/app/.kube/config -v $(pwd)/config.yaml:/app/config.yaml kpods-monitor
 ```
+
+### Deploy with Helm 🚀
+```bash
+# Add Helm repository
+helm repo add rogosprojects https://rogosprojects.github.io/helm
+# Update Helm repositories
+helm repo update
+# Install
+helm install kpods-monitor rogosprojects/kpods-monitor
+```
+**Done!** Follow the post-installation message to discover the log page URL.
+
+[Read the full **Helm chart documentation** with default values.yaml](https://rogosprojects.github.io/helm/charts/kpods-monitor/)
+
 
 ### Command-line Options
 
