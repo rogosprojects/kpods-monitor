@@ -67,7 +67,14 @@ func NewCollector(config *models.Config) (*Collector, error) {
 		config:    config,
 	}
 
-	// Initialize metrics client if available
+	// Check if metrics are disabled in the configuration
+	if config.Cluster.MetricsEnabled == false {
+		logger.DefaultLogger.Info("Metrics collection is disabled in configuration", nil)
+		collector.metricsEnabled = false
+		return collector, nil
+	}
+
+	// Initialize metrics client
 	collector.initMetricsClient(k8sConfig)
 
 	return collector, nil
@@ -75,6 +82,7 @@ func NewCollector(config *models.Config) (*Collector, error) {
 
 // initMetricsClient initializes the metrics client if metrics-server is available
 func (c *Collector) initMetricsClient(k8sConfig *rest.Config) {
+
 	// Try to create metrics client using the provided config
 	mClient, err := metricsv.NewForConfig(k8sConfig)
 	if err != nil {

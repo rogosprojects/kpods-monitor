@@ -844,13 +844,15 @@ func (s *Server) sendInitialData(client *websocketClient) {
 
 	// Create response with the checked applications
 	response := struct {
-		Applications []models.Application `json:"applications"`
-		LastUpdated  time.Time            `json:"lastUpdated"`
-		UpdateReason string               `json:"updateReason,omitempty"`
+		Applications   []models.Application `json:"applications"`
+		LastUpdated    time.Time            `json:"lastUpdated"`
+		UpdateReason   string               `json:"updateReason,omitempty"`
+		MetricsEnabled bool                 `json:"metricsEnabled"`
 	}{
-		Applications: apps,
-		LastUpdated:  lastUpdated,
-		UpdateReason: initialReason,
+		Applications:   apps,
+		LastUpdated:    lastUpdated,
+		UpdateReason:   initialReason,
+		MetricsEnabled: s.config.Cluster.MetricsEnabled,
 	}
 
 	// Set write deadline and send data without holding the lock
@@ -908,13 +910,15 @@ func (s *Server) broadcastToClients() {
 
 	// Create response with the checked applications
 	responseData := struct {
-		Applications []models.Application `json:"applications"`
-		LastUpdated  time.Time            `json:"lastUpdated"`
-		UpdateReason string               `json:"updateReason,omitempty"`
+		Applications   []models.Application `json:"applications"`
+		LastUpdated    time.Time            `json:"lastUpdated"`
+		UpdateReason   string               `json:"updateReason,omitempty"`
+		MetricsEnabled bool                 `json:"metricsEnabled"`
 	}{
-		Applications: apps,
-		LastUpdated:  lastUpdated,
-		UpdateReason: broadcastReason,
+		Applications:   apps,
+		LastUpdated:    lastUpdated,
+		UpdateReason:   broadcastReason,
+		MetricsEnabled: s.config.Cluster.MetricsEnabled,
 	}
 
 	// Now get the list of clients under a lock
@@ -1036,11 +1040,13 @@ func (s *Server) handleGetApplications(w http.ResponseWriter, r *http.Request) {
 
 	// Format response to match v1 API
 	response := struct {
-		Applications []models.Application `json:"applications"`
-		LastUpdated  time.Time            `json:"lastUpdated"`
+		Applications   []models.Application `json:"applications"`
+		LastUpdated    time.Time            `json:"lastUpdated"`
+		MetricsEnabled bool                 `json:"metricsEnabled"`
 	}{
-		Applications: applications,
-		LastUpdated:  lastUpdated,
+		Applications:   applications,
+		LastUpdated:    lastUpdated,
+		MetricsEnabled: s.config.Cluster.MetricsEnabled,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -1264,11 +1270,13 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Create a client-facing config with only necessary information
 	clientConfig := struct {
-		DashboardName string `json:"dashboardName"`
-		Version       string `json:"version"`
+		DashboardName  string `json:"dashboardName"`
+		Version        string `json:"version"`
+		MetricsEnabled bool   `json:"metricsEnabled"`
 	}{
-		DashboardName: s.config.General.Name,
-		Version:       version.Version,
+		DashboardName:  s.config.General.Name,
+		Version:        version.Version,
+		MetricsEnabled: s.config.Cluster.MetricsEnabled,
 	}
 
 	// Return JSON response

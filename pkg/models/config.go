@@ -55,6 +55,10 @@ type ClusterConfig struct {
 
 	// Path to kubeconfig file
 	KubeConfigPath string `json:"kubeConfigPath" yaml:"kubeConfigPath"`
+
+	// Enable or disable metrics collection
+	// If false, only pod status will be monitored (no CPU/memory metrics)
+	MetricsEnabled bool `json:"metricsEnabled" yaml:"metricsEnabled"`
 }
 
 // ApplicationConfig defines a logical application composed of related workloads

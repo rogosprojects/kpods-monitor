@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let wsReconnectAttempts = 0;
   let wsPingInterval = null; // Interval for sending ping messages
   let version = '0.0.0';
+  let metricsEnabled = true; // Default to true, will be updated from server config
 
 
   // Get the base path from the current URL
@@ -72,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Update global state with the server-provided configuration
       dashboardName = config.dashboardName || 'Kubernetes Pod Monitor Dashboard';
       version = config.version || '0.0.0';
+      metricsEnabled = config.metricsEnabled !== false; // Default to true if not specified
 
       // Update config display if dashboard is already initialized
       updateConfig();
@@ -1088,7 +1090,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const appId = `app-${app.name.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
 
     return `
-      <div class="application-card" id="${appId}">
+      <div class="application-card" id="${appId}" data-metrics-enabled="${metricsEnabled}">
         <div class="application-header">
           <h2>${app.name}</h2>
           <div class="namespace-tags-container">
@@ -1114,12 +1116,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <th>Status</th>
                     <th>Age</th>
                     <th>Restarts</th>
+                    ${metricsEnabled ? `
                     <th>CPU</th>
                     <th>Memory</th>
+                    ` : ''}
                   </tr>
                 </thead>
                 <tbody>
-                  ${app.pods.map(pod => renderPodRow(pod)).join('')}
+                  ${app.pods.map(pod => renderPodRow(pod, metricsEnabled)).join('')}
                 </tbody>
               </table>
             ` : `
@@ -1149,7 +1153,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Render a single pod table row
-  function renderPodRow(pod) {
+  function renderPodRow(pod, metricsEnabled = true) {
     // Add missing class for workloads that don't exist in the cluster
     const missingClass = pod.missing ? 'missing-workload' : '';
 
@@ -1175,12 +1179,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Format CPU with trend indicator - only show for up or down trends
-    const cpuWithTrend = pod.cpu !== 'N/A' && pod.cpuTrend && pod.cpuTrend !== 'static'
+    const cpuWithTrend = metricsEnabled && pod.cpu !== 'N/A' && pod.cpuTrend && pod.cpuTrend !== 'static'
       ? `${pod.cpu} <span class="trend-indicator ${getTrendClass(pod.cpuTrend)}" title="CPU usage trend">${getTrendIndicator(pod.cpuTrend)}</span>`
       : pod.cpu || 'N/A';
 
     // Format Memory with trend indicator - only show for up or down trends
-    const memoryWithTrend = pod.memory !== 'N/A' && pod.memoryTrend && pod.memoryTrend !== 'static'
+    const memoryWithTrend = metricsEnabled && pod.memory !== 'N/A' && pod.memoryTrend && pod.memoryTrend !== 'static'
       ? `${pod.memory} <span class="trend-indicator ${getTrendClass(pod.memoryTrend)}" title="Memory usage trend">${getTrendIndicator(pod.memoryTrend)}</span>`
       : pod.memory || 'N/A';
 
@@ -1223,8 +1227,10 @@ document.addEventListener('DOMContentLoaded', () => {
         <td class="${restartClass}">
           <span class="restart-count">${restartIcons || '0'}</span>
         </td>
+        ${metricsEnabled ? `
         <td>${cpuWithTrend}</td>
         <td>${memoryWithTrend}</td>
+        ` : ''}
       </tr>
     `;
   }
@@ -1447,6 +1453,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Update pods table
     const tableContainer = cardElement.querySelector('.pods-table-container');
     if (tableContainer) {
+
+      // Update the data-metrics-enabled attribute
+      cardElement.setAttribute('data-metrics-enabled', metricsEnabled);
+
       if (app.pods && app.pods.length > 0) {
         tableContainer.innerHTML = `
           <table class="pods-table">
@@ -1456,12 +1466,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 <th>Status</th>
                 <th>Age</th>
                 <th>Restarts</th>
+                ${metricsEnabled ? `
                 <th>CPU</th>
                 <th>Memory</th>
+                ` : ''}
               </tr>
             </thead>
             <tbody>
-              ${app.pods.map(pod => renderPodRow(pod)).join('')}
+              ${app.pods.map(pod => renderPodRow(pod, metricsEnabled)).join('')}
             </tbody>
           </table>
         `;

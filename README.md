@@ -209,6 +209,10 @@ cluster:
 
   # Path to kubeconfig file (used when inCluster is false)
   kubeConfigPath: "~/.kube/config"
+
+  # Enable or disable metrics collection (CPU/Memory)
+  # If false, only pod status will be monitored (no CPU/memory metrics)
+  metricsEnabled: true
 ```
 
 
@@ -431,6 +435,7 @@ The dashboard collects pod metrics using the Kubernetes Metrics API:
 - Collects CPU and memory usage for each pod in efficient batches
 - Calculates usage trends based on historical data
 - Formats metrics in human-readable format (e.g., MiB, GiB)
+- Can be completely disabled via configuration to reduce load on Kubernetes API server
 
 ### Health Calculation
 

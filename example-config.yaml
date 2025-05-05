@@ -40,6 +40,9 @@ cluster:
   # Path to kubeconfig file (used when inCluster is false)
   # Supports ~ for home directory
   kubeConfigPath: "~/.kube/config"
+  # Enable or disable metrics collection (CPU/Memory)
+  # If false, only pod status will be monitored (no CPU/memory metrics)
+  metricsEnabled: false # Set to true to enable metrics collection
 
 # Applications to monitor
 # Each application can span multiple namespaces and include various workloads
