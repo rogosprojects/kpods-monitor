@@ -42,6 +42,11 @@ cluster:
   kubeConfigPath: "~/.kube/config"
   # Enable or disable metrics collection (CPU/Memory)
   # If false, only pod status will be monitored (no CPU/memory metrics)
+  # When disabled:
+  # - No connections are made to the Kubernetes Metrics API
+  # - CPU and memory columns are hidden in the UI
+  # - Pod status watching continues to function normally
+  # - Resource usage is significantly reduced
   metricsEnabled: false # Set to true to enable metrics collection
 
 # Applications to monitor

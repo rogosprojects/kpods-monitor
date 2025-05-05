@@ -500,6 +500,7 @@ func (s *Server) Start() error {
 		"using_informers":        true,
 		"max_connections":        s.maxConnections,
 		"max_connections_per_ip": 20,
+		"metrics_enabled":        s.config.Cluster.MetricsEnabled,
 	})
 
 	// Ensure we clean up resources when the server exits

@@ -215,6 +215,15 @@ cluster:
   metricsEnabled: true
 ```
 
+The `metricsEnabled` option allows you to completely disable metrics collection while keeping pod status watching enabled. This is useful in the following scenarios:
+
+- When running in clusters without metrics-server installed
+- When you want to reduce load on the Kubernetes API server
+- When you only need to monitor pod status and not resource usage
+- In large clusters with many pods where metrics collection might be resource-intensive
+
+When set to `false`, the dashboard will not make any connections to the Kubernetes Metrics API, and the CPU and memory columns will be hidden in the UI. This significantly reduces the resource usage of the dashboard while still providing real-time updates for pod status changes.
+
 
 
 ## 📱 UI Features
@@ -436,6 +445,13 @@ The dashboard collects pod metrics using the Kubernetes Metrics API:
 - Calculates usage trends based on historical data
 - Formats metrics in human-readable format (e.g., MiB, GiB)
 - Can be completely disabled via configuration to reduce load on Kubernetes API server
+
+When metrics collection is disabled:
+- No connections are made to the Kubernetes Metrics API
+- CPU and memory columns are hidden in the UI
+- Pod status watching continues to function normally
+- Real-time updates for pod status changes are still provided
+- Resource usage is significantly reduced by eliminating metrics-related API calls
 
 ### Health Calculation
 
